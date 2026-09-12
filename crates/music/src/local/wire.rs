@@ -146,6 +146,10 @@ pub fn has_lying_xing_frame_count(path: &Path, skip: u64) -> bool {
         })
 }
 
+pub fn normalize(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
 pub fn album_id(artist: &str, name: &str) -> String {
     let mut hasher = DefaultHasher::new();
     normalize(artist).hash(&mut hasher);
@@ -153,16 +157,10 @@ pub fn album_id(artist: &str, name: &str) -> String {
     format!("{LOCAL_ALBUM_PREFIX}{:016x}", hasher.finish())
 }
 
-pub fn normalize(value: &str) -> String {
-    value.trim().to_lowercase()
-}
-
 pub fn artist_id(name: &str) -> String {
-    format!("{LOCAL_ARTIST_PREFIX}{name}")
-}
-
-pub fn artist_name_from_id(id: &str) -> Option<&str> {
-    id.strip_prefix(LOCAL_ARTIST_PREFIX)
+    let mut hasher = DefaultHasher::new();
+    normalize(name).hash(&mut hasher);
+    format!("{LOCAL_ARTIST_PREFIX}{:016x}", hasher.finish())
 }
 
 /// The id a genre carries across the api: the tag text normalized, so spellings that differ
@@ -178,10 +176,10 @@ pub fn genre_key_from_id(id: &str) -> Option<&str> {
 
 fn artist_refs(artist: &str) -> Vec<ArtistRef> {
     split_artists(artist)
-        .iter()
-        .map(|name| ArtistRef {
-            name: name.to_owned(),
-            id: Some(artist_id(name)),
+        .into_iter()
+        .map(|name| {
+            let id = artist_id(&name);
+            ArtistRef { name, id: Some(id) }
         })
         .collect()
 }
