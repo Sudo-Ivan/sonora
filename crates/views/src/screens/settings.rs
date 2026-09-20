@@ -1560,7 +1560,7 @@ impl SettingsView {
                 match adaptive
                     && !matches!(kind, ThemeKind::System | ThemeKind::Dark | ThemeKind::Light)
                 {
-                    true => item.disabled(),
+                    true => item.disabled().tooltip("settings-theme-unavailable"),
                     false => item.on_click(cx.listener(move |this, _, _, cx| {
                         let overrides = this.settings.update(cx, |settings, cx| {
                             settings.set_theme(kind.id(), cx);
