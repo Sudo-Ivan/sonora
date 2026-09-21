@@ -896,6 +896,7 @@ impl Library {
             _daily: Some(daily),
         };
         library.held_mut(Shelf::Streaming).state = LibraryState::Loading;
+        library.held_mut(Shelf::Local).shape = Shape::Catalog;
         library.prime(Shelf::Streaming, cx);
         match library.session.read(cx).client_of(Shelf::Local).is_some() {
             true => library.load(Shelf::Local, cx),
