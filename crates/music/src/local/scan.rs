@@ -259,7 +259,8 @@ fn look_for_portraits(
 ) -> Vec<Look> {
     let named: HashSet<String> = readings
         .iter()
-        .map(|reading| wire::normalize(&reading.tagged.track.artists))
+        .flat_map(|reading| &reading.tagged.track.artist_refs)
+        .map(|artist| wire::artist_id(&artist.name))
         .collect();
 
     spread(folders, progress, |folder| {
@@ -270,7 +271,7 @@ fn look_for_portraits(
         let portrait = match known {
             Some(seen) => seen.portrait.clone(),
             None => named
-                .contains(&wire::normalize(&folder_name(&folder.path)))
+                .contains(&wire::artist_id(&folder_name(&folder.path)))
                 .then(|| wire::artist_cover(&folder.path))
                 .flatten(),
         };
@@ -286,21 +287,21 @@ fn look_for_portraits(
 
 /// Files each portrait under the artist its folder is named after, first one in walk order.
 fn name_portraits(looks: &[Look], readings: &[Reading]) -> HashMap<String, String> {
-    let mut by_normalized: HashMap<String, String> = HashMap::new();
-    for reading in readings {
-        by_normalized
-            .entry(wire::normalize(&reading.tagged.track.artists))
-            .or_insert_with(|| reading.tagged.track.artists.clone());
-    }
+    let artists: HashSet<String> = readings
+        .iter()
+        .flat_map(|reading| &reading.tagged.track.artist_refs)
+        .map(|artist| wire::artist_id(&artist.name))
+        .collect();
 
     let mut portraits = HashMap::new();
     for look in looks {
         let Some(portrait) = &look.portrait else {
             continue;
         };
-        let Some(artist) = by_normalized.get(&wire::normalize(&folder_name(&look.path))) else {
+        let artist = wire::artist_id(&folder_name(&look.path));
+        if !artists.contains(&artist) {
             continue;
-        };
+        }
         portraits
             .entry(artist.clone())
             .or_insert_with(|| portrait.clone());
@@ -332,10 +333,12 @@ fn group_albums(parsed: &[Tagged]) -> Vec<Album> {
             let mut tracks: Vec<Track> = indices.iter().map(|&i| parsed[i].track.clone()).collect();
             tracks.sort_by_key(|track| (track.disc_number, track.track_number, track.name.clone()));
 
-            let album_artist = indices
+            let album_artists = indices
                 .iter()
-                .find_map(|&i| parsed[i].album_artist.clone())
-                .unwrap_or_else(|| wire::shared_artists(&tracks));
+                .map(|&i| &parsed[i].album_artists)
+                .find(|artists| !artists.is_empty())
+                .cloned()
+                .unwrap_or_else(|| vec![wire::artist_ref(&wire::shared_artists(&tracks))]);
             let name = tracks[0].album.clone();
             let year = album_year(indices, parsed);
             let release = indices
@@ -346,7 +349,7 @@ fn group_albums(parsed: &[Tagged]) -> Vec<Album> {
             Some(wire::album_from_tracks(
                 &id,
                 &name,
-                &album_artist,
+                &album_artists,
                 &tracks,
                 year,
                 release,
@@ -374,6 +377,7 @@ fn album_year(indices: &[usize], parsed: &[Tagged]) -> i32 {
         .unwrap_or(0)
 }
 
+/// Groups track credits by artist id, keeping the first spelling and best available cover.
 fn group_artists(
     parsed: &[Tagged],
     portraits: &HashMap<String, String>,
@@ -424,7 +428,10 @@ fn group_artists(
                 id,
                 name,
                 cover,
-                added_at: indices.iter().filter_map(|&i| parsed[i].track.added_at).max(),
+                added_at: indices
+                    .iter()
+                    .filter_map(|&i| parsed[i].track.added_at)
+                    .max(),
             })
         })
         .collect()

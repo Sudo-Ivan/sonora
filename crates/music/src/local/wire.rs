@@ -1,10 +1,9 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::sync::LazyLock;
 
-use aho_corasick::AhoCorasick;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::prelude::Accessor;
@@ -67,21 +66,11 @@ const PLAYABLE_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "wav", "opus", "webm", "mka", "wv", "ape",
 ];
 
-static ARTIST_SEPARATORS: LazyLock<AhoCorasick> = LazyLock::new(|| {
-    AhoCorasick::builder()
-        .ascii_case_insensitive(true)
-        .build([
-            ",",
-            ";",
-            "&",
-            " ft. ",
-            " feat ",
-            " feat. ",
-            " featuring ",
-            " with ",
-        ])
-        .expect("artist separators are valid patterns")
-});
+/// Chooses the track or album artist keys when reading a tag's list of names.
+enum Field {
+    TrackArtist,
+    AlbumArtist,
+}
 
 fn is_playable(path: &Path) -> bool {
     path.extension()
@@ -190,34 +179,47 @@ pub fn genre_key_from_id(id: &str) -> Option<&str> {
     id.strip_prefix(LOCAL_GENRE_PREFIX)
 }
 
-fn artist_refs(artist: &str) -> Vec<ArtistRef> {
-    split_artists(artist)
-        .into_iter()
-        .map(|name| {
-            let id = artist_id(&name);
-            ArtistRef { name, id: Some(id) }
-        })
-        .collect()
-}
-
-fn split_artists(value: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut start = 0;
-
-    for found in ARTIST_SEPARATORS.find_iter(value) {
-        parts.push(value[start..found.start()].trim().to_owned());
-        start = found.end();
+/// A navigable local artist, keyed without regard to capitalization.
+pub fn artist_ref(name: &str) -> ArtistRef {
+    ArtistRef {
+        id: Some(artist_id(name)),
+        name: name.to_owned(),
     }
-    parts.push(value[start..].trim().to_owned());
-
-    parts.retain(|p| !p.is_empty());
-    parts
 }
 
-fn clean(value: Option<std::borrow::Cow<'_, str>>) -> Option<String> {
+fn artist_refs(name: &str, names: Vec<String>) -> Vec<ArtistRef> {
+    let names = match names.is_empty() {
+        true => vec![name.to_owned()],
+        false => names,
+    };
+    names.iter().map(|name| artist_ref(name)).collect()
+}
+
+/// Returns the artists from tags. It reads `TrackArtists`/`AlbumArtists` first, then falls back to
+/// `TrackArtist`/`AlbumArtist`. Empty means there is no artist information or it can't be read.
+fn one_or_many(tag: Option<&Tag>, field: Field) -> Vec<String> {
+    let Some(tag) = tag else { return Vec::new() };
+    let (plural, single) = match field {
+        Field::TrackArtist => (ItemKey::TrackArtists, ItemKey::TrackArtist),
+        Field::AlbumArtist => (ItemKey::AlbumArtists, ItemKey::AlbumArtist),
+    };
+    let names = clean_multiple(tag.get_strings(plural));
+    match names.is_empty() {
+        true => clean_multiple(tag.get_strings(single)),
+        false => names,
+    }
+}
+
+fn clean(value: Option<Cow<'_, str>>) -> Option<String> {
     value
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+fn clean_multiple<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
+    values
+        .filter_map(|value| clean(Some(Cow::Borrowed(value))))
+        .collect()
 }
 
 fn infer_from_stem(stem: &str) -> (Option<String>, Option<String>) {
@@ -271,6 +273,8 @@ pub struct Tagged {
     pub track: Track,
     /// The album artist the tags name, `None` when they name none.
     pub album_artist: Option<String>,
+    /// The individual album artists, empty when no album artist is tagged.
+    pub album_artists: Vec<ArtistRef>,
     pub year: Option<i32>,
     /// The release type the tags name, `None` when they name neither a type nor a compilation.
     pub release: Option<ReleaseType>,
@@ -505,19 +509,24 @@ pub fn track_from_file(
         .or(inferred_title)
         .unwrap_or_else(|| file_stem(path));
 
-    let artist = clean(tag.and_then(Accessor::artist))
+    let artist_names = one_or_many(tag, Field::TrackArtist);
+    let artist = (!artist_names.is_empty())
+        .then(|| artist_names.join(", "))
         .or_else(|| fallback.as_ref().and_then(|fb| fb.artist.clone()))
         .or_else(|| lenient.as_ref().and_then(|l| l.artist.clone()))
         .or_else(|| artist_hint.map(str::to_owned))
         .or(inferred_artist)
         .unwrap_or_else(|| "Unknown Artist".to_owned());
+    let track_artist_refs = artist_refs(&artist, artist_names);
 
-    let album_artist = clean(
-        tag.and_then(|tag| tag.get_string(ItemKey::AlbumArtist))
-            .map(std::borrow::Cow::Borrowed),
-    )
-    .or_else(|| fallback.as_ref().and_then(|fb| fb.album_artist.clone()))
-    .or_else(|| lenient.as_ref().and_then(|l| l.album_artist.clone()));
+    let album_artist_names = one_or_many(tag, Field::AlbumArtist);
+    let album_artist = (!album_artist_names.is_empty())
+        .then(|| album_artist_names.join(", "))
+        .or_else(|| fallback.as_ref().and_then(|fb| fb.album_artist.clone()))
+        .or_else(|| lenient.as_ref().and_then(|l| l.album_artist.clone()));
+    let album_artists = album_artist
+        .as_deref()
+        .map_or_else(Vec::new, |name| artist_refs(name, album_artist_names));
 
     let album_name = clean(tag.and_then(Accessor::album))
         .or_else(|| fallback.as_ref().and_then(|fb| fb.album.clone()))
@@ -607,7 +616,7 @@ pub fn track_from_file(
             name,
             playable: is_playable(path),
             artists: artist.clone(),
-            artist_refs: artist_refs(&artist),
+            artist_refs: track_artist_refs,
             album: album_name,
             album_id,
             cover,
@@ -624,6 +633,7 @@ pub fn track_from_file(
             credits: Vec::new(),
         },
         album_artist,
+        album_artists,
         year,
         release,
     })
@@ -634,17 +644,22 @@ pub fn track_from_file(
 pub fn album_from_tracks(
     id: &str,
     name: &str,
-    artist: &str,
+    artist_refs: &[ArtistRef],
     tracks: &[Track],
     year: i32,
     release: ReleaseType,
 ) -> Album {
+    let artists = artist_refs
+        .iter()
+        .map(|artist| artist.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
     let cover = tracks.iter().find_map(|track| track.cover.clone());
     Album {
         id: id.to_owned(),
         name: name.to_owned(),
-        artists: artist.to_owned(),
-        artist_refs: artist_refs(artist),
+        artists,
+        artist_refs: artist_refs.to_vec(),
         cover: cover.clone(),
         cover_large: cover,
         release_type: release,
@@ -837,6 +852,7 @@ fn genres(values: impl IntoIterator<Item = String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lofty::tag::{ItemValue, TagItem, TagType};
 
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(name);
@@ -879,6 +895,53 @@ mod tests {
         let (title, artist) = infer_from_stem("SingleTitle");
         assert_eq!(title, None);
         assert_eq!(artist, None);
+    }
+
+    fn tagged(items: &[(ItemKey, &str)]) -> Tag {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        for (key, value) in items {
+            let item = TagItem::new(*key, ItemValue::Text((*value).to_owned()));
+            assert!(
+                tag.push(item),
+                "{key:?} field is not supported by this format"
+            );
+        }
+        tag
+    }
+
+    #[test]
+    fn a_repeated_field_is_several_artists() {
+        let tag = tagged(&[
+            (ItemKey::TrackArtist, "First"),
+            (ItemKey::TrackArtist, " Second"),
+            (ItemKey::TrackArtist, "Third  "),
+        ]);
+
+        let names = one_or_many(Some(&tag), Field::TrackArtist);
+        let refs = artist_refs(&names.join(", "), names);
+
+        assert_eq!(refs.len(), 3);
+        assert_eq!(refs[0].name, "First");
+        assert_eq!(refs[1].name, "Second");
+        assert_eq!(refs[2].name, "Third");
+    }
+
+    #[test]
+    fn the_credited_list_wins_over_the_single_field() {
+        let tag = tagged(&[
+            (ItemKey::TrackArtist, "First & Second"),
+            (ItemKey::TrackArtists, "First"),
+            (ItemKey::TrackArtists, "Second"),
+        ]);
+
+        let names = one_or_many(Some(&tag), Field::TrackArtist);
+
+        assert_eq!(names, ["First", "Second"]);
+    }
+
+    #[test]
+    fn an_artist_id_ignores_capitalization() {
+        assert_eq!(artist_id("Artist"), artist_id("artist"));
     }
 
     #[test]
@@ -971,7 +1034,7 @@ mod tests {
         let album = album_from_tracks(
             "id",
             "Album",
-            "Artist",
+            &[artist_ref("Artist")],
             &[older, newer],
             2026,
             ReleaseType::Album,
