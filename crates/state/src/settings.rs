@@ -580,7 +580,7 @@ impl AppSettings {
                 (None, false)
             }
         };
-        let parsed = bytes.map(|bytes| (serde_json::from_slice::<Values>(&bytes), bytes));
+        let parsed = bytes.map(|bytes| (serde_json::from_slice::<Values>(json(&bytes)), bytes));
         let (values, writable, disk, broken) = match parsed {
             Some((Ok(values), bytes)) => (values, writable, Some(bytes), None),
             Some((Err(error), _)) => {
@@ -1822,7 +1822,7 @@ impl AppSettings {
             self.broken = None;
             return SettingsReload::Unchanged;
         }
-        let values = match serde_json::from_slice::<Values>(&bytes) {
+        let values = match serde_json::from_slice::<Values>(json(&bytes)) {
             Ok(values) => values,
             Err(error) => {
                 log::warn!("settings: cannot parse {}: {error}", self.path.display());
@@ -2005,9 +2005,15 @@ fn load_themes(directory: &Path, previous: &[CustomTheme]) -> LoadedThemes {
     LoadedThemes { themes, retry }
 }
 
+/// The JSON in a file without the UTF-8 byte order mark that Notepad and PowerShell can put in
+/// front of it on Windows, which serde_json rejects as an unexpected character.
+fn json(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
+}
+
 /// Parses one theme file and assigns the identifier derived from its path.
 fn parse_theme(bytes: &[u8], path: &Path, id: &str) -> Result<CustomTheme> {
-    let value: serde_json::Value = serde_json::from_slice(bytes)
+    let value: serde_json::Value = serde_json::from_slice(json(bytes))
         .with_context(|| format!("cannot parse {}", path.display()))?;
     let object = value
         .as_object()
