@@ -445,7 +445,7 @@ song-popularity = Popularita
 song-popularity-value = { $value } %
 song-disc-track = Disk { $disc }, skladba { $track }
 song-track = Skladba { $track }
-song-credits = Titulky
+song-credits = Autoři
 song-performed-by = Účinkující
 song-details = Žánry a podrobnosti
 song-genres = Žánry
@@ -860,7 +860,7 @@ lyrics-writers = Napsali { $writers }
 
 update-available = Vyšla Sonora { $version }
 update-detail = Máš { $running }. Přečti si, co se změnilo, nebo aktualizuj hned teď.
-update-detail-notes = Máš { $running }. Přečti, co se změnilo, a pak Sonoru aktualizuj stejně, stejným způsobem, jakým byla nainstalována.
+update-detail-notes = Máš { $running }. Přečti, co se změnilo, a pak Sonoru aktualizuj stejným způsobem, jakým byla nainstalována.
 update-notes = Co je nového
 update-now = Aktualizovat
 update-later = Později
