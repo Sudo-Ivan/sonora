@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use gpui::{App, Context, Entity, EventEmitter, SharedString, Task};
@@ -117,6 +117,11 @@ const THROTTLE_CAP: Duration = Duration::from_secs(30);
 /// How many refusals in a row a track is retried through before it is held paused until play.
 const THROTTLE_LIMIT: u8 = 6;
 const RESUME_STEP: Duration = Duration::from_secs(5);
+/// How long a pause may last before play reloads the track instead of resuming the engine. What
+/// an engine holds goes stale while paused, and resuming it plays out the queued audio and then
+/// reports the track as ended. Apple's license asks for renewal 13 minutes after it is issued,
+/// and that clock starts at the load rather than the pause, so this leaves room for a long track.
+const STALE_PAUSE: Duration = Duration::from_secs(5 * 60);
 const TAPER_DB: f32 = 50.;
 const SIMILAR_LIMIT: usize = 20;
 
@@ -387,6 +392,9 @@ pub struct Playback {
     /// Loads the provider turned down for now since audio last played or the user last picked a
     /// track. It sets how long the next retry waits.
     throttles: u8,
+    /// When the engine last reported a pause. It is wall-clock time so a suspend counts toward
+    /// `STALE_PAUSE`, and a clock set back counts as stale.
+    paused_at: Option<SystemTime>,
     refused: Option<Refusal>,
     /// Where the restored track resumes. Set until the engine has it ready or the user plays.
     resume_at: Option<Duration>,
@@ -497,6 +505,7 @@ impl Playback {
             blocked_until: None,
             failures: 0,
             throttles: 0,
+            paused_at: None,
             refused: None,
             resume_at: None,
             seek_in_flight: None,
@@ -1761,7 +1770,8 @@ impl Playback {
         self.load_after(&track, Start::Pick, cx);
     }
 
-    /// Plays on. A restored track the engine does not hold yet is loaded at its position.
+    /// Plays on. A restored track the engine does not hold yet, or one paused for longer than
+    /// `STALE_PAUSE`, is loaded afresh at its position.
     pub fn resume(&mut self, cx: &mut Context<Self>) {
         self.intent = Intent::Play;
         if let Some(at) = self.resume_at {
@@ -1770,6 +1780,14 @@ impl Playback {
             }
             self.resume_at = None;
             self.resume_ready = false;
+        }
+        if self
+            .paused_at
+            .take()
+            .is_some_and(|since| since.elapsed().unwrap_or(STALE_PAUSE) >= STALE_PAUSE)
+        {
+            log::info!("playback: paused too long to trust the engine, reloading the track");
+            return self.reload_and_seek(self.position, cx);
         }
         if let Some(engine) = self.active_engine() {
             engine.play();
@@ -2376,6 +2394,7 @@ impl Playback {
                 let started = self.state != PlaybackState::Playing;
                 self.intent = Intent::Play;
                 self.state = PlaybackState::Playing;
+                self.paused_at = None;
                 self.failures = 0;
                 self.throttles = 0;
                 self.position = at;
@@ -2388,6 +2407,7 @@ impl Playback {
             BackendEvent::Paused { at, .. } => {
                 self.intent = Intent::Pause;
                 self.state = PlaybackState::Paused;
+                self.paused_at = Some(SystemTime::now());
                 self.position = at;
                 self.clock.reset(at, false);
                 self.remember(true, cx);
@@ -2511,6 +2531,7 @@ impl Playback {
             self.blocked_until = None;
             self.failures = 0;
             self.throttles = 0;
+            self.paused_at = None;
             self.refused = None;
             self.track = None;
             self.origin = None;
