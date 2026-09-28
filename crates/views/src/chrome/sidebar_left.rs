@@ -15,9 +15,7 @@ use gpui::{Window, div, px};
 use router::{
     Destination, LibraryTab, NavEntry, Navigation, NavigationEvent, SettingsTab, navigate,
 };
-use state::{
-    AppSettings, Library, Origin, PinSort, Pins, Playback, PlaybackState, Session, Shelf, Sonora,
-};
+use state::{AppSettings, Library, Origin, PinSort, Pins, Playback, Session, Shelf, Sonora};
 
 use crate::shared::menus::{ItemMenu, item_menu};
 
@@ -478,10 +476,7 @@ impl SidebarLeft {
         };
 
         let origin = Origin::from(&pin);
-        let playing = matches!(
-            self.playback.read(cx).playing_from(&origin),
-            Some(PlaybackState::Playing)
-        );
+        let playing = self.playback.read(cx).playing_from(&origin) == Some(true);
 
         let card = Card::new(("pinned", index), pin.label())
             .cover(pin.cover.clone())

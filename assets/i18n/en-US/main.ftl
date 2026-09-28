@@ -319,7 +319,6 @@ detail-play-playlist = Play playlist
 # play button
 play-pause = Pause
 play-resume = Resume
-play-loading = Loading...
 play-shuffle = Shuffle
 
 # artist page

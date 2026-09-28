@@ -293,7 +293,6 @@ detail-play-playlist = Reproducir lista
 # play button
 play-pause = Pausar
 play-resume = Reanudar
-play-loading = Cargando…
 play-shuffle = Aleatorio
 
 # artist page

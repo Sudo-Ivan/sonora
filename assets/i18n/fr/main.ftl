@@ -308,7 +308,6 @@ detail-play-playlist = Lire la playlist
 # play button
 play-pause = Pause
 play-resume = Reprendre
-play-loading = Chargement…
 play-shuffle = Lecture aléatoire
 
 # artist page

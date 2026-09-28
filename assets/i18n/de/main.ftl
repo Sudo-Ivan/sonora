@@ -271,7 +271,6 @@ detail-play-playlist = Playlist abspielen
 # play button
 play-pause = Pause
 play-resume = Fortsetzen
-play-loading = Wird geladen…
 play-shuffle = Zufallswiedergabe
 
 # artist page

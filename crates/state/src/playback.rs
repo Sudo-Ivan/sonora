@@ -1172,9 +1172,13 @@ impl Playback {
         self.origin.as_ref()
     }
 
-    /// The playback state when the queue was started from `origin`, so its page can show it.
-    pub fn playing_from(&self, origin: &Origin) -> Option<PlaybackState> {
-        (self.origin.as_ref() == Some(origin)).then(|| self.state.clone())
+    /// What a play button for `origin` shows, read like `control`. `None` when the queue came
+    /// from somewhere else, so pressing it starts `origin` afresh.
+    pub fn playing_from(&self, origin: &Origin) -> Option<bool> {
+        match self.origin.as_ref() == Some(origin) {
+            true => self.control(),
+            false => None,
+        }
     }
 
     /// Drops the station the queue was playing, continuation and fetch alike, once the queue
@@ -1961,6 +1965,13 @@ impl Playback {
         self.intent == Intent::Play && self.track.is_some()
     }
 
+    /// What a play button for the current track shows. `Some(true)` is pause and `Some(false)`
+    /// is play, and pressing either goes to `toggle_play`. `None` means nothing is loaded that a
+    /// press could resume, so the button starts its tracks instead.
+    pub fn control(&self) -> Option<bool> {
+        self.has_active_playback().then(|| self.wants_playing())
+    }
+
     pub fn play_origin(&mut self, origin: Origin, cx: &mut Context<Self>) {
         match origin.whence {
             Whence::Album => self.play_album_of(origin, cx),
@@ -1976,9 +1987,8 @@ impl Playback {
     /// starts it otherwise.
     pub fn toggle_origin(&mut self, origin: &Origin, cx: &mut Context<Self>) {
         match self.playing_from(origin) {
-            Some(PlaybackState::Playing) => self.pause(cx),
-            Some(PlaybackState::Paused) => self.resume(cx),
-            _ => self.play_origin(origin.clone(), cx),
+            Some(_) => self.toggle_play(cx),
+            None => self.play_origin(origin.clone(), cx),
         }
     }
 
@@ -2095,16 +2105,6 @@ impl Playback {
 
     pub fn is_loading(&self) -> bool {
         matches!(self.state, PlaybackState::Loading)
-    }
-
-    /// The state a play button should show. A restored track the engine is only holding ready
-    /// reads as paused, however long that takes: nobody asked for it yet, and pressing play
-    /// resumes it from where it stopped.
-    pub fn apparent(&self) -> PlaybackState {
-        match (&self.state, self.resume_at.is_some()) {
-            (PlaybackState::Loading, true) => PlaybackState::Paused,
-            (state, _) => state.clone(),
-        }
     }
 
     /// Whether a track is loaded, whatever it is doing.
