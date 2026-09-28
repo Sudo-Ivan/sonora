@@ -54,7 +54,7 @@ library-not-loaded = Tvoje knihovna se nenačetla
 library-scanning = Procházím tvoje složky…
 library-scanning-found = Procházím tvoje složky… zatím { $found }
 library-scanning-progress = Načítám tvoji hudbu… { $read } z { $found }
-library-part-not-loaded = Tato část tvoje knihovny se nenačetla
+library-part-not-loaded = Tato část tvé knihovny se nenačetla
 library-local-unconfigured = Nastav svou místní knihovnu
 
 # app menu
@@ -87,7 +87,7 @@ column-title = Název
 column-artist = Interpret
 column-album = Album
 column-date-added = Datum přidání
-column-added-by = Přidáno
+column-added-by = Přidáno uživatelem
 column-modified = Změněno
 column-length = Délka
 column-plays = Přehrání
@@ -132,7 +132,11 @@ menu-remove-tracks-from-history = { $count ->
    *[other] Odebrat { $count } skladeb z historie
 }
 menu-delete-track-file = Smazat soubor skladby
-menu-delete-track-files = Smazat { $count } souborů skladeb
+menu-delete-track-files = { $count ->
+    [one] Smazat { $count } soubor skladby
+    [few] Smazat { $count } soubory skladeb
+   *[other] Smazat { $count } souborů skladeb
+}
 menu-play-next = Přehrát jako další
 menu-play-tracks-next = { $count ->
     [one] Přehrát { $count } skladbu jako další
@@ -151,7 +155,7 @@ menu-play-tracks-last = { $count ->
     [few] Přehrát { $count } skladby jako poslední
    *[other] Přehrát { $count } skladeb jako poslední
 }
-menu-song-radio = Přejít na radiostanici skladby
+menu-song-radio = Přejít na rádio skladby
 menu-go-to-album = Přejít na album
 menu-go-to-artist = Přejít na interpreta
 menu-view-details = Zobrazit podrobnosti
@@ -196,9 +200,9 @@ confirm-remove-library-title = Odebrat z knihovny
 confirm-remove-playlist-title = Odebrat z playlistu
 confirm-remove-history-title = Odebrat z historie
 confirm-remove-songs = { $count ->
-    [one] Odebrat tuto skladbu z tvoje knihovny?
-    [few] Odebrat { $count } skladby z tvoje knihovny?
-   *[other] Odebrat { $count } skladeb z tvoje knihovny?
+    [one] Odebrat tuto skladbu z tvé knihovny?
+    [few] Odebrat { $count } skladby z tvé knihovny?
+   *[other] Odebrat { $count } skladeb z tvé knihovny?
 }
 confirm-remove-playlist-songs = { $count ->
     [one] Odebrat tuto skladbu z playlistu?
@@ -211,19 +215,19 @@ confirm-remove-history-songs = { $count ->
    *[other] Odebrat { $count } skladeb z historie poslouchání?
 }
 confirm-remove-albums = { $count ->
-    [one] Odebrat toto album z tvoje knihovny?
-    [few] Odebrat { $count } alba z tvoje knihovny?
-   *[other] Odebrat { $count } alb z tvoje knihovny?
+    [one] Odebrat toto album z tvé knihovny?
+    [few] Odebrat { $count } alba z tvé knihovny?
+   *[other] Odebrat { $count } alb z tvé knihovny?
 }
 confirm-remove-artists = { $count ->
     [one] Odebrat tohoto interpreta z oblíbených?
-    [few] Odebrat { $count } interpreti z oblíbených?
+    [few] Odebrat { $count } interprety z oblíbených?
    *[other] Odebrat { $count } interpretů z oblíbených?
 }
 confirm-remove-playlists = { $count ->
-    [one] Odebrat tento playlist z tvoje knihovny?
-    [few] Odebrat { $count } playlisty z tvoje knihovny?
-   *[other] Odebrat { $count } playlistů z tvoje knihovny?
+    [one] Odebrat tento playlist z tvé knihovny?
+    [few] Odebrat { $count } playlisty z tvé knihovny?
+   *[other] Odebrat { $count } playlistů z tvé knihovny?
 }
 confirm-delete-track-files-title = Smazat soubory skladeb?
 confirm-delete-track-files = Soubory budou trvale smazány z disku. Tuto akci nelze vzít zpět.
@@ -234,7 +238,7 @@ queue-history = Historie
 queue-now-playing = Teď se hraje
 queue-from = Z
 queue-next-in-queue = Další ve frontě
-queue-up-next = Příští
+queue-up-next = Následuje
 queue-reset = Obnovit
 queue-clear = Vymazat
 queue-empty = Tvoje fronta je prázdná
@@ -244,7 +248,7 @@ queue-return-playing = Zpět k tomu, co se hraje
 
 # player bar
 player-nothing-playing = Nic se nehraje
-player-percent = { $value }%
+player-percent = { $value } %
 player-shuffle = Náhodně
 player-repeat = Opakovat
 player-repeat-all = Opakovat vše
@@ -266,13 +270,13 @@ history-clear-title = Vymazat historii poslouchání
 history-clear-confirm = Z tohoto zařízení se odstraní všechna přehrání. Tuto akci nelze vzít zpět.
 filter-library = Filtrovat tvoji knihovnu
 filter-album = Filtrovat skladby alba
-filter-reset = Vymazat filtry
+filter-reset = Resetovat filtry
 filter-duration = Délka
 filter-year = Rok
 filter-explicit = Jen explicitní
 filter-playable = Jen přehratelné
 filter-favorites = Jen oblíbené
-filter-owned = Tvoje
+filter-owned = Vytvořené tebou
 
 # view
 view-list = Seznam
@@ -292,23 +296,23 @@ login-failed-title = Přihlášení se nezdařilo
 login-problem-region = Spotify neotevře relaci ze země, ve které právě jsi. Přihlas se ze své domovské země, nebo změň zemi na svém účtu Spotify.
 login-problem-credentials = Tvoje uložená relace Spotify už není platná. Pro pokračování se přihlas znovu.
 login-problem-network = Sonora se nedostala k hudební službě. Zkontroluj připojení k internetu a zkus to znovu.
-login-problem-cancelled = Před schválením přihlášení jsi zavřel stránku v prohlížeči. Začni znovu, aby se přihlášení dokončilo.
+login-problem-cancelled = Přihlášení nebylo schváleno a stránka v prohlížeči byla zavřena. Začni znovu, aby se přihlášení dokončilo.
 login-problem-refused = Spotify přihlášení odmítla. Počkej chvíli a zkus to znovu.
 login-problem-premium = Sonora streamuje přes Spotify Premium a tento účet ho nemá. Pro pokračování se přihlas účtem s Premium.
 login-sign-in = Přihlásit se přes { $provider }
 login-connect-cookies = Vložit cookies ručně
 login-cookie-open = Otevřít { $provider }
 login-cookie-submit = Pokračovat
-login-cookie-hint = Sem vlož hlavičku Cookie požadavku
-login-cookie-step-1 = Otevři music.youtube.com a ujisti se, že jsi přihlášen. Nejlépe se hodí anonymní okno.
+login-cookie-hint = Sem vlož hlavičku Cookie z požadavku
+login-cookie-step-1 = Otevři music.youtube.com a ujisti se, že jsi přihlášen. Nejlépe funguje anonymní okno.
 login-cookie-step-2 = Stiskni F12, otevři kartu Network a obnov stránku.
 login-cookie-step-3 = Vyber jakýkoli požadavek s názvem „browse“ nebo „next“.
-login-cookie-step-4 = V záložce Headers najdi Cookie v části Request Headers, klikni na něj pravým tlačítkem a zkopíruj jeho hodnotu.
+login-cookie-step-4 = V kartě Headers najdi Cookie v části Request Headers, klikni na něj pravým tlačítkem a zkopíruj jeho hodnotu.
 login-cookie-step-note = Vlož celou hodnotu včetně SAPISID a __Secure-3PAPISID.
 login-cookie-header-title = Vlož své cookies { $provider } a dokonči přihlášení
 login-cookie-apple-step-3 = Vyber jakýkoli požadavek na { $site }.
 login-cookie-apple-note = Vlož celou hodnotu včetně { $cookie }.
-login-cookie-named-title = Vlož svůj cookie { $provider } a dokonči přihlášení
+login-cookie-named-title = Vlož cookie { $provider } a dokonči přihlášení
 login-cookie-named-hint = Sem vlož hodnotu cookie
 login-cookie-named-step-1 = Otevři { $site } a ujisti se, že jsi přihlášen.
 login-cookie-named-step-2 = Stiskni F12 a ve Firefoxu otevři kartu Storage, v Chromu kartu Application.
@@ -365,7 +369,7 @@ artist-filter-all = Vše
 artist-filter-albums = Alba
 artist-filter-singles = Singly
 artist-filter-eps = EP
-artist-appears-on = Vystupuje na
+artist-appears-on = Objevuje se na
 album-also-like = Možná se ti bude líbit
 album-tab-albums = Alba
 album-tab-artists = Interpreti
@@ -402,7 +406,7 @@ home-recently-added = Nedávno přidané
 home-playlists = Playlisty
 home-favorite-albums = Oblíbená alba
 home-artists = Interpreti
-home-collection-albums = Alba z tvoje knihovny
+home-collection-albums = Alba z tvé knihovny
 
 # search page
 search-placeholder = Co chceš poslouchat?
@@ -434,21 +438,21 @@ song-loading = Načítají se informace o skladbě…
 song-about = O této skladbě
 song-album = Album
 song-released = Vydáno
-song-streams = Přehrání na streamu
+song-streams = Přehrání
 song-position = Pozice
 song-label = Vydavatelství
 song-popularity = Popularita
-song-popularity-value = { $value }%
+song-popularity-value = { $value } %
 song-disc-track = Disk { $disc }, skladba { $track }
 song-track = Skladba { $track }
-song-credits = Kredity
-song-performed-by = Předvedli
+song-credits = Titulky
+song-performed-by = Účinkující
 song-details = Žánry a podrobnosti
 song-genres = Žánry
 song-language = Jazyk
 song-content = Obsah
 song-explicit = Explicitní
-song-clean = Čistá
+song-clean = Bez vulgarismů
 artist-about = O interpretu
 artist-about-fallback = Prozkoumej populární skladby a vydání interpreta.
 artist-about-open = Přejít na interpreta
@@ -469,7 +473,7 @@ language-ru = Ruština
 language-tr = Turečtina
 language-uk = Ukrajinština
 language-zh = Čínština
-language-zxx = Bez textového obsahu
+language-zxx = Bez jazykového obsahu
 
 # counts
 count-songs =
@@ -487,8 +491,8 @@ count-tracks =
 
 # running times
 runtime-seconds = { $seconds } s
-runtime-minutes = { $minutes } m { $seconds } s
-runtime-hours = { $hours } h { $minutes } m
+runtime-minutes = { $minutes } min { $seconds } s
+runtime-hours = { $hours } h { $minutes } min
 
 # dates
 date-just-now = Právě teď
@@ -522,14 +526,14 @@ settings-theme = Motiv
 settings-theme-detail = Vyber barevnou paletu aplikace
 settings-opacity = Průhlednost
 settings-opacity-detail = Uprav průhlednost pozadí aplikace
-settings-opacity-value = { $percent }%
+settings-opacity-value = { $percent } %
 settings-theme-folder = Otevřít složku
 settings-adaptive = Adaptivní motiv
 settings-adaptive-detail = Obarvi paletu barvami obálky právě hrajícího alba
 settings-ambient = Ambientní pozadí
 settings-ambient-detail = Vyplň přehrávač na celou obrazovku barvami z obálky
 settings-ambient-motion = Pohyb pozadí
-settings-ambient-motion-detail = Nech barvy pozadí pomalu plavat místo, aby stály v klidu
+settings-ambient-motion-detail = Nech barvy pozadí pomalu plynout, místo aby stály na místě
 settings-visualizer = Vizualizér
 settings-visualizer-detail = Jak se spektrum kreslí za obálkou na celé obrazovce
 settings-visualizer-style-none = Vypnutý
@@ -537,9 +541,9 @@ settings-visualizer-style-bars = Pruhy
 settings-visualizer-style-wave = Vlna
 settings-visualizer-style-both = Pruhy a vlna
 settings-visualizer-absolute = Ignorovat hlasitost
-settings-visualizer-absolute-detail = Kresli spektrum podle vlastní úrovně skladby, ať ji Sonora přehrává sebeboutičněji
+settings-visualizer-absolute-detail = Kresli spektrum podle vlastní úrovně skladby, bez ohledu na to, jak hlasitě ji Sonora přehrává
 settings-fullscreen-controls-autohide = Skrýt ovládání na celé obrazovce
-settings-fullscreen-controls-autohide-detail = Při neaktivní celé obrazovce nechat ovládání přehrávání zeslatnout
+settings-fullscreen-controls-autohide-detail = Skryje ovládací prvky přehrávání, když na celé obrazovce nic neděláš
 settings-icons = Sada ikon
 settings-icons-detail = Vyber sadu ikon, ze které rozhraní kreslí
 settings-motion = Omezit pohyb
@@ -547,11 +551,11 @@ settings-motion-detail = Přeskočit animace a přechody rozhraní
 settings-pace = Rychlost animací
 settings-pace-detail = Jak rychle se přehrávají animace rozhraní
 settings-saver = Úspora baterie
-settings-saver-detail = Omezit snímkovou frekvenci animací, když Sonora nemá fokus. Použije se při příštím spuštění
+settings-saver-detail = Omezí snímkovou frekvenci animací, když Sonora není v popředí. Použije se při příštím spuštění
 settings-corners = Rohy
 settings-corners-detail = Jak kulaté jsou plochy a ovládací prvky
 settings-blur = Rozostření rozhraní
-settings-blur-detail = Rozostři nabídky a plovoucí ovládací prvky nad tím, čemu překrývají
+settings-blur-detail = Rozostři nabídky a plovoucí ovládací prvky nad tím, co překrývají
 settings-blur-window = Rozostření okna
 settings-blur-window-detail = Kresli okno nad rozostřenou plochou. Potřebuje průhlednost pod 100 %
 settings-font = Velikost písma
@@ -564,7 +568,7 @@ settings-entries-detail = Sekce uvedené v postranním panelu
 settings-entries-pick = Vyber položky
 settings-language = Jazyk
 settings-language-detail = Jazyk, který Sonora používá v celém rozhraní
-settings-language-system = Systémový
+settings-language-system = Podle systému
 settings-language-search = Hledat jazyk
 settings-language-none = Nenalezeny žádné jazyky
 settings-typeface = Písmo
@@ -572,13 +576,13 @@ settings-typeface-detail = Písmo, které Sonora používá v celém rozhraní
 settings-typeface-system = Výchozí
 settings-typeface-search = Hledat písmo
 settings-typeface-none = Nenalezena žádná písma
-settings-server-side-decorations = Dekorace systému
-settings-server-side-decorations-detail = Nech okenový systém vykreslit titulní pruh, okraj a stín
+settings-server-side-decorations = Systémové dekorace okna
+settings-server-side-decorations-detail = Nech správce oken vykreslit titulní pruh, okraj a stín
 settings-typeface-loading = Načítá se…
 settings-window-controls = Ovládací prvky okna
-settings-window-controls-detail = Vykreslit minimalizovat, maximalizovat a zavřít v titulním pruhu
+settings-window-controls-detail = Zobrazit tlačítka pro minimalizaci, maximalizaci a zavření v titulním pruhu
 settings-traffic-light-controls = Ovládací prvky jako semafor
-settings-traffic-light-controls-detail = Vykreslit minimalizovat, maximalizovat a zavřít jako barevné tečky
+settings-traffic-light-controls-detail = Zobrazit tlačítka pro minimalizaci, maximalizaci a zavření jako barevné tečky
 settings-window-rounding = Rohy okna
 settings-window-rounding-detail = Jak kulaté jsou vlastní rohy okna
 settings-controls-side = Strana ovládacích prvků
@@ -586,11 +590,11 @@ settings-controls-side-detail = Na kterém konci titulního pruhu jsou ovládac�
 settings-close-to-tray = Ponechat na pozadí
 settings-close-to-tray-detail = Nech Sonoru běžet a přehrávat i po zavření okna
 settings-tray-icon = Zobrazit v systémové liště
-settings-tray-icon-detail = Vlož ikonu s ovládáním přehrávání do systémové lišty
+settings-tray-icon-detail = Zobrazí ikonu s ovládáním přehrávání v systémové liště
 settings-discord = Zobrazit na Discordu
 settings-discord-detail = Zobrazit právě hrající skladbu na tvém profilu Discord
 settings-discord-name = Název stavu
-settings-discord-name-detail = Jak se stav jmenuje za „Poslouchá“, kterou vidí tvoji přátelé
+settings-discord-name-detail = Jak se stav jmenuje za „Poslouchá“, který vidí tvoji přátelé
 settings-discord-name-sonora = Sonora
 settings-discord-name-provider = Poskytovatel
 settings-discord-name-music = Hudba
@@ -634,7 +638,7 @@ settings-widevine-installing = Instaluje se…
 settings-widevine-installed = Nalezen v prohlížeči
 settings-widevine-fetched = Stažen od Googlu
 settings-widevine-missing = Nenainstalován
-settings-widevine-configured = Nastaven prostředím
+settings-widevine-configured = Nastaven proměnnou prostředí
 settings-widevine-fetch = Stáhnout
 settings-widevine-uninstall = Odinstalovat
 confirm-uninstall-widevine-title = Odinstalovat modul Widevine?
@@ -643,14 +647,14 @@ widevine-prompt-title = Modul Widevine
 widevine-prompt-wanted = Skladby Apple Music jsou šifrované a potřebují modul Widevine od Googlu. Žádný prohlížeč v tomto počítači ho nemá. Sonora ho může stáhnout ze serverů Googlu, stejný soubor, který instaluje Chrome, a uložit do své vlastní složky.
 widevine-prompt-replace = Skladby Apple Music jsou šifrované a potřebují modul Widevine od Googlu. Prohlížeč v tomto počítači ho má a Sonora si místo něj může stáhnout vlastní kopii od Googlu, stejný soubor, který instaluje Chrome, a uložit ji do své složky.
 widevine-prompt-downloading = Stahuje se…
-widevine-prompt-terms = Stahuje se verze { $version }. Instalací přijímáš podmínky Googlu k modulu:
+widevine-prompt-terms = Stáhla se verze { $version }. Instalací přijímáš podmínky Googlu pro tento modul:
 widevine-prompt-installing = Instaluje se…
 widevine-prompt-download = Stáhnout
 widevine-prompt-later = Teď ne
 widevine-prompt-accept = Přijmout a nainstalovat
 widevine-prompt-decline = Odmítnout
 settings-equalizer = Ekvalizér
-settings-equalizer-detail = Utváří zvuk v deseti pásmech, jedno na oktávu
+settings-equalizer-detail = Upravuje zvuk v deseti pásmech, jedno pásmo na oktávu
 settings-equalizer-preset = Předvolba
 settings-equalizer-preset-detail = Připravená křivka pro pásma níže
 settings-equalizer-custom = Vlastní
@@ -673,25 +677,25 @@ settings-panel-lyrics-size = Velikost textu (panel)
 settings-panel-lyrics-size-detail = Velikost textu písně v postranním panelu nad základní velikostí písma
 settings-fullscreen-lyrics-size = Velikost textu (celá obrazovka)
 settings-fullscreen-lyrics-size-detail = Velikost textu písně v přehrávači na celé obrazovce nad základní velikostí písma
-settings-lyrics-size-value = { $size }%
+settings-lyrics-size-value = { $size } %
 settings-lyrics-for-local-files = Texty písní pro místní soubory
 settings-lyrics-for-local-files-detail = Použije metadata z místních souborů k vyhledání textu písně na internetu
 settings-artwork-for-local-files = Obálky pro místní soubory
-settings-artwork-for-local-files-detail = Použije metadata z místních souborů k nalezení obálky na Deezer pro tvůj stav na Discordu
+settings-artwork-for-local-files-detail = Použije metadata z místních souborů k nalezení obálky na Deezeru pro tvůj stav na Discordu
 settings-prefer-local-lyrics = Upřednostnit místní texty
 settings-prefer-local-lyrics-detail = Použije text uložený v tagu místního souboru nebo v jeho souboru .lrc místo hledání u ostatních poskytovatelů
 settings-karaoke-lyrics = Karaoke texty
 settings-karaoke-lyrics-detail = Zvýrazňuje text slovo po slově, pokud je dostupné časování
 settings-blur-lyrics = Rozostřit neaktivní texty
 settings-blur-lyrics-detail = Rozostřuje nadcházející a předchozí řádky v panelu s textem
-settings-romanized-lyrics = Přepsané texty
+settings-romanized-lyrics = Romanizované texty
 settings-romanized-lyrics-detail = Zobrazuje místně vytvořenou výslovnost pro vybrané písmové systémy
 settings-romanization-writing-systems = Písmové systémy
 settings-lyrics-providers = Poskytovatelé textů
 settings-lyrics-providers-detail = Vyber služby, ve kterých se mají hledat texty písní
 settings-lyrics-providers-selected = { $count ->
     [one] Vybrán { $count } poskytovatel
-    [few] Vybraní { $count } poskytovatelé
+    [few] Vybráni { $count } poskytovatelé
    *[other] Vybráno { $count } poskytovatelů
     }
 settings-lyrics-provider-local = Místní soubory
@@ -706,8 +710,8 @@ settings-romanization-japanese = Japonština
 settings-romanization-chinese = Čínština
 settings-romanization-korean = Korejština
 settings-romanization-cyrillic = Cyrilice
-settings-romanization-greek = Řecké
-settings-romanization-arabic = Arabské
+settings-romanization-greek = Řečtina
+settings-romanization-arabic = Arabština
 settings-romanization-other = Ostatní písmové systémy
 settings-advanced = Pokročilé
 settings-group-window = Okno
@@ -732,7 +736,7 @@ settings-provider-current = Přehrává se z této služby
 settings-provider-guest = Přehrává se jako host
 settings-provider-switch = Přepnout na
 settings-sign-out = Odhlásit se
-settings-group-scrobbling = Odesílání do služeb
+settings-group-scrobbling = Scrobblování
 settings-lastfm = Last.fm
 settings-lastfm-detail = Sonora odesílá poslechy přes tvůj vlastní účet Last.fm API. Vytvoř ho a sem vlož klíč a tajný klíč.
 settings-librefm = Libre.fm
@@ -761,7 +765,7 @@ settings-add-folder = Přidat složku
 settings-remove-folder = Odebrat složku
 settings-rescan = Znovu prohledat
 settings-scan-walking = Prohledává se…
-settings-scan-progress = { $percent }%
+settings-scan-progress = { $percent } %
 settings-scan-done = Hotovo za { $seconds } s
 settings-tab-about = O aplikaci
 settings-version = Verze
@@ -777,15 +781,15 @@ settings-team-github = GitHub
 settings-role-lead-maintainer = Hlavní správce
 settings-role-maintainer = Správce
 settings-role-contributor = Přispěvatel
-settings-notice = Copyright © 2026 Autoři Sonora. Sonora je poskytována bez jakýchkoli záruk. Jde o svobodný software a můžeš ji šířit za podmínek GNU General Public License verze 3 nebo novější. Sonora není oficiální a není spojena se Spotify AB.
+settings-notice = Copyright © 2026 Přispěvatelé projektu Sonora. Sonora je poskytována bez jakýchkoli záruk. Jde o svobodný software a můžeš ji šířit za podmínek GNU General Public License verze 3 nebo novější. Sonora není oficiální a není spojena se Spotify AB.
 
 # themes
-theme-system = Systémový
+theme-system = Podle systému
 theme-dark = Tmavý
 theme-light = Světlý
 theme-midnight = Půlnoční
 theme-forest = Lesní
-theme-ocean = Oceán
+theme-ocean = Oceánský
 theme-rose = Růžový
 theme-lavender = Levandulový
 theme-amber = Jantarový
@@ -798,7 +802,7 @@ corners-rounded = Zaoblené
 corners-round = Kulaté
 
 # motion
-motion-system = Systémový
+motion-system = Podle systému
 motion-always = Vždy
 motion-never = Nikdy
 pace-slow = Pomalé
@@ -813,17 +817,17 @@ toast-playlist-created = Playlist vytvořen
 toast-playlist-renamed = Playlist přejmenován
 toast-playlist-deleted = Playlist smazán
 toast-local-delete-failed = Některé soubory skladeb se nepodařilo smazat
-toast-playlist-added = Playlist přidán do tvoje knihovny
-toast-playlist-removed = Playlist odebrán z tvoje knihovny
+toast-playlist-added = Playlist přidán do tvé knihovny
+toast-playlist-removed = Playlist odebrán z tvé knihovny
 toast-playlist-visibility = Viditelnost playlistu změněna
 toast-track-added = Přidáno do playlistu: { $name }
 toast-track-removed = Odebráno z playlistu: { $name }
 toast-playlist-failed = Tuto změnu se nepodařilo uložit
 toast-playlist-busy = Jiná změna ještě probíhá
 toast-playlist-signed-out = Pro změnu playlistů se přihlas
-toast-queued-track = { $name } přidáno do fronty
-toast-next-track = { $name } se přehrá jako další
-toast-last-track = { $name } se přehrá jako poslední
+toast-queued-track = Do fronty přidáno: { $name }
+toast-next-track = { $name } se přehraje jako další
+toast-last-track = { $name } se přehraje jako poslední
 toast-queued-album = Album přidáno do fronty
 toast-next-album = Album se přehrá jako další
 toast-last-album = Album se přehrá jako poslední
@@ -834,36 +838,36 @@ toast-queued-artist = Interpret přidán do fronty
 toast-next-artist = Interpret se přehrá jako další
 toast-last-artist = Interpret se přehrá jako poslední
 toast-queue-failed = Toto se nepodařilo přidat do fronty
-toast-keys-refused = Spotify tomuto účtu neuděluje ovládací klávesy přehrávání
-toast-sign-in-to-play = { $name } jde streamovat jen přihlášenému posluchači
+toast-keys-refused = Spotify tomuto účtu neuděluje klíče pro přehrávání
+toast-sign-in-to-play = { $name } lze streamovat jen po přihlášení
 toast-track-unplayable = { $name } se nepodařilo přehrát
-toast-library-add-failed = { $name } se nepodařilo přidat do tvoje knihovny
-toast-library-remove-failed = { $name } se nepodařilo odebrat z tvoje knihovny
-toast-library-added = Přidáno do tvoje knihovny
-toast-library-removed = Odebráno z tvoje knihovny
+toast-library-add-failed = { $name } se nepodařilo přidat do tvé knihovny
+toast-library-remove-failed = { $name } se nepodařilo odebrat z tvé knihovny
+toast-library-added = Přidáno do tvé knihovny
+toast-library-removed = Odebráno z tvé knihovny
 
 # lyrics
 lyrics-title = Text písně
-lyrics-idle = Přehrávej něco a text se tu objeví
+lyrics-idle = Spusť přehrávání a text se tu objeví
 lyrics-loading = Hledá se text písně…
-lyrics-missing = Text se nenašel, promíjíme!
+lyrics-missing = Text se nepodařilo najít, promiň!
 lyrics-instrumental = Tato skladba je instrumentální
 lyrics-failed = Služba s texty písní je nedostupná
-lyrics-follow = Sledovat skladbu znovu
-lyrics-source = Text z { $source }
+lyrics-follow = Vrátit se k aktuálnímu řádku
+lyrics-source = Text ze zdroje { $source }
 lyrics-source-local = Text z místního souboru
 lyrics-writers = Napsali { $writers }
 
 update-available = Vyšla Sonora { $version }
-update-detail = Máš { $running }. Přečti, co se změnilo, nebo se rovnou aktualizuj.
-update-detail-notes = Máš { $running }. Přečti, co se změnilo, a pak Sonora aktualizuj stejně, jako jsi ji instaloval.
+update-detail = Máš { $running }. Přečti si, co se změnilo, nebo aktualizuj hned teď.
+update-detail-notes = Máš { $running }. Přečti, co se změnilo, a pak Sonoru aktualizuj stejně, stejným způsobem, jakým byla nainstalována.
 update-notes = Co je nového
 update-now = Aktualizovat
 update-later = Později
 update-working = Aktualizace se stahuje…
 update-failed = Aktualizaci se nepodařilo nainstalovat. Zkus to znovu ze stránky s vydáními.
 settings-check-updates = Kontrolovat aktualizace
-settings-check-updates-detail = Při startu se jednou zeptat Githubu, jestli vyšla novější verze. Sonora nainstaluje aktualizaci sama jen na Windows; jinde ukáže, co se změnilo
+settings-check-updates-detail = Při startu se jednou zeptat GitHubu, jestli vyšla novější verze. Sonora nainstaluje aktualizaci sama jen na Windows; jinde ukáže, co se změnilo
 settings-log = Soubor protokolu
 settings-log-detail = Co Sonora zapsala během běhu. Přilož to k hlášení chyby
 settings-log-open = Otevřít protokol
@@ -876,9 +880,9 @@ tags-sheet-details = Podrobnosti
 tags-title = Název
 tags-artist = Interpret
 tags-track = Číslo skladby
-tags-track-total = Skladeb na vydání
+tags-track-total = Celkem skladeb
 tags-disc = Číslo disku
-tags-disc-total = Disků ve vydání
+tags-disc-total = Celkem disků
 tags-album = Album
 tags-album-artist = Interpret alba
 tags-year = Rok
@@ -903,9 +907,9 @@ trouble-offline = Žádné připojení
 trouble-offline-detail = Zkontroluj připojení k internetu a zkus to znovu.
 trouble-not-loaded = Načtení se nezdařilo
 trouble-retry = Zkusit znovu
-toast-offline = Žádné připojení. Do návratu se nebude streamovat nic.
+toast-offline = Žádné připojení. Dokud se neobnoví, nic se nebude streamovat.
 toast-settings-broken = Oprav řádek { $name } v settings.json, aby se změny uložily
-toast-tray-unavailable = Není k dispozici systémová lišta, kam by se ikona vložila
+toast-tray-unavailable = Systémová lišta není k dispozici, ikonu nelze zobrazit
 
 # power
 wake-reason = Hraje hudba
