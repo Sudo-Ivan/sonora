@@ -235,16 +235,16 @@ impl SidebarLeft {
     fn ceiling(&self, window: &Window, cx: &Context<Self>) -> Pixels {
         let reserved = match self.overlays() {
             true => Pixels::ZERO,
-            false => SNUG + super::Chrome::sidebar_right(cx),
+            false => SNUG + super::Chrome::reserved_right(cx),
         };
 
         super::cap(MIN_WIDTH, MAX_WIDTH, reserved, window)
     }
 
     /// Flips into or out of the cramped state from the room the window leaves
-    /// beside a right sidebar of `right` pixels. This runs inside a render,
-    /// where a notify schedules nothing, so a flip asks for a full window
-    /// refresh instead. That effect lands once the draw is over.
+    /// once `right` pixels are held back for the right sidebar. This runs inside
+    /// a render, where a notify schedules nothing, so a flip asks for a full
+    /// window refresh instead. That effect lands once the draw is over.
     pub fn adapt(&mut self, right: Pixels, window: &Window, cx: &mut App) {
         self.width = ui::snapped(self.width, window);
 
@@ -616,7 +616,7 @@ impl Render for SidebarLeft {
 
         let current = self.trail.read(cx).current();
         self.follow(&current);
-        self.adapt(super::Chrome::sidebar_right(cx), window, cx);
+        self.adapt(super::Chrome::reserved_right(cx), window, cx);
 
         if !cx.has_active_drag() {
             self.dropping = false;
