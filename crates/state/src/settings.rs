@@ -410,6 +410,7 @@ struct StateValues {
     sidebar_right_width: f32,
     sidebar_right_open: bool,
     sidebar_right_tab: SideTab,
+    fullscreen_tab: Option<SideTab>,
     shuffle: bool,
     repeat: Repeat,
     radio: bool,
@@ -438,6 +439,7 @@ impl Default for StateValues {
             sidebar_right_width: DEFAULT_SIDEBAR_RIGHT_WIDTH,
             sidebar_right_open: false,
             sidebar_right_tab: SideTab::Queue,
+            fullscreen_tab: Some(SideTab::Lyrics),
             shuffle: false,
             repeat: Repeat::Off,
             radio: false,
@@ -758,6 +760,12 @@ impl AppSettings {
 
     pub fn sidebar_right_tab(&self) -> SideTab {
         self.state.sidebar_right_tab
+    }
+
+    /// The panel the fullscreen view last showed beside the cover, or `None` when it showed the
+    /// artwork alone.
+    pub fn fullscreen_tab(&self) -> Option<SideTab> {
+        self.state.fullscreen_tab
     }
 
     pub fn shuffle(&self) -> bool {
@@ -1265,6 +1273,14 @@ impl AppSettings {
             return;
         }
         self.state.sidebar_right_tab = tab;
+        self.schedule_state_save(cx);
+    }
+
+    pub fn set_fullscreen_tab(&mut self, tab: Option<SideTab>, cx: &mut Context<Self>) {
+        if self.state.fullscreen_tab == tab {
+            return;
+        }
+        self.state.fullscreen_tab = tab;
         self.schedule_state_save(cx);
     }
 
