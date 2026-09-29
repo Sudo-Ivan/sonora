@@ -24,6 +24,7 @@ impl SubsonicProvider {
         server: String,
         username: String,
         password: String,
+        insecure_tls: bool,
     ) -> Result<ProviderSession> {
         let server = auth::normalize_server(&server)?;
         let signature = auth::sign(&username, &password);
@@ -32,6 +33,7 @@ impl SubsonicProvider {
             username.clone(),
             password.clone(),
             &signature,
+            insecure_tls,
         )?;
         let profile = client
             .profile()
@@ -42,6 +44,7 @@ impl SubsonicProvider {
             username,
             password,
             signature: Some(signature),
+            insecure_tls,
         })?;
         Ok(ProviderSession {
             profile,
@@ -69,6 +72,7 @@ impl SubsonicProvider {
             remembered.username.clone(),
             remembered.password.clone(),
             &signature,
+            remembered.insecure_tls,
         )?;
         match client.profile().await {
             Ok(profile) => Ok(Some(ProviderSession {
@@ -109,6 +113,7 @@ impl MusicProvider for SubsonicProvider {
             server: String::new(),
             username: String::new(),
             password: String::new(),
+            insecure_tls: false,
         }]
     }
 
@@ -145,6 +150,7 @@ impl MusicProvider for SubsonicProvider {
             server,
             username,
             password,
+            insecure_tls,
         } = method
         else {
             anyhow::bail!("subsonic signs in with a server address, username and password")
@@ -155,7 +161,7 @@ impl MusicProvider for SubsonicProvider {
         if password.is_empty() {
             anyhow::bail!("the subsonic password is empty");
         }
-        Self::connect(server, username, password).await
+        Self::connect(server, username, password, insecure_tls).await
     }
 
     fn sign_out(&self) {

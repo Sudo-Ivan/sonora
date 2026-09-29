@@ -42,6 +42,7 @@ pub struct LoginView {
     username: Entity<Input>,
     password: Entity<Input>,
     credentials_for: Option<&'static str>,
+    insecure_tls: bool,
     manual_secret: Option<(&'static str, &'static str)>,
     tab: usize,
 }
@@ -56,6 +57,7 @@ impl LoginView {
             username: cx.new(|cx| Input::new("login-username-hint", cx)),
             password: cx.new(|cx| Input::new("login-password-hint", cx).masked()),
             credentials_for: None,
+            insecure_tls: false,
             manual_secret: None,
             tab: 0,
         }
@@ -75,6 +77,7 @@ impl LoginView {
 
     fn clear_credentials(&mut self, cx: &mut Context<Self>) {
         self.credentials_for = None;
+        self.insecure_tls = false;
         self.server.update(cx, |input, cx| input.set_text("", cx));
         self.username.update(cx, |input, cx| input.set_text("", cx));
         self.password.update(cx, |input, cx| input.set_text("", cx));
@@ -100,6 +103,7 @@ impl LoginView {
         if server.trim().is_empty() || username.trim().is_empty() || password.is_empty() {
             return;
         }
+        let insecure_tls = self.insecure_tls;
         self.clear_credentials(cx);
         self.start(
             slug,
@@ -107,6 +111,7 @@ impl LoginView {
                 server,
                 username,
                 password,
+                insecure_tls,
             },
             cx,
         );
@@ -357,12 +362,22 @@ impl LoginView {
     }
 
     fn credentials_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let insecure_tls = self.insecure_tls;
         Modal::new("server-prompt", t!("login-server-title"))
             .w(px(560.))
             .detail(t!("login-server-detail"))
             .child(self.server.clone())
             .child(self.username.clone())
             .child(self.password.clone())
+            .child(
+                Checkbox::new("server-insecure-tls", insecure_tls)
+                    .label(t!("login-server-insecure"))
+                    .text_color(cx.theme().muted_foreground)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.insecure_tls = !insecure_tls;
+                        cx.notify();
+                    })),
+            )
             .action(
                 Button::new("cancel-server")
                     .ghost()

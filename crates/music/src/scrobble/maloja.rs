@@ -22,7 +22,12 @@ impl Service for Maloja {
     }
 
     async fn connect(&self, secret: Secret) -> Result<Account> {
-        let Secret::Server { url, key } = secret else {
+        let Secret::Server {
+            url,
+            key,
+            insecure_tls,
+        } = secret
+        else {
             bail!("maloja needs a server url and an api key");
         };
         let (url, key) = (root(&url), key.trim().to_owned());
@@ -30,7 +35,11 @@ impl Service for Maloja {
             bail!("maloja needs a server url and an api key");
         }
 
-        let answer = super::http()
+        let http = match insecure_tls {
+            true => crate::tls::insecure(),
+            false => super::http().clone(),
+        };
+        let answer = http
             .get(format!("{url}{API}/test"))
             .query(&[("key", &key)])
             .send()
@@ -44,17 +53,22 @@ impl Service for Maloja {
         }
 
         Ok(Account {
-            name: name(&url).await.unwrap_or_else(|| host(&url)),
+            name: name(&url, &http).await.unwrap_or_else(|| host(&url)),
             server: url,
             session: key,
+            insecure_tls,
             enabled: true,
             ..Account::default()
         })
     }
 
     async fn scrobble(&self, account: &Account, plays: &[Play]) -> Result<()> {
+        let http = match account.insecure_tls {
+            true => crate::tls::insecure(),
+            false => super::http().clone(),
+        };
         for play in plays {
-            let answer: Answer = super::http()
+            let answer: Answer = http
                 .post(format!("{}{API}/newscrobble", account.server))
                 .json(&New {
                     key: &account.session,
@@ -111,8 +125,8 @@ struct Info {
 }
 
 /// What the instance calls itself, which is friendlier in the settings row than its host.
-async fn name(url: &str) -> Option<String> {
-    let info: Info = super::http()
+async fn name(url: &str, http: &reqwest::Client) -> Option<String> {
+    let info: Info = http
         .get(format!("{url}{API}/serverinfo"))
         .send()
         .await

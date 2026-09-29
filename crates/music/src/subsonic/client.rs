@@ -62,11 +62,25 @@ impl SubsonicClient {
         username: String,
         password: String,
         signature: &Signature,
+        insecure_tls: bool,
     ) -> Result<Self> {
         let server = server.trim_end_matches('/').to_owned();
+        // One client serves the API and the streams, and its choice registers the server's
+        // certificate for the artwork fetcher, which only ever sees a cover's url.
+        let http = match insecure_tls {
+            true => crate::tls::insecure(),
+            false => reqwest::Client::new(),
+        };
+        if let Some(authority) = crate::tls::authority(&server) {
+            match insecure_tls {
+                true => crate::tls::trust(authority),
+                false => crate::tls::distrust(authority),
+            }
+        }
         let client = Client::new(&server, Auth::token(&username, password))
             .context("cannot parse the subsonic server address")?
-            .with_client_name(CLIENT_NAME);
+            .with_client_name(CLIENT_NAME)
+            .with_http_client(http.clone());
         let covers = format!(
             "{server}/rest/getCoverArt?u={}&t={}&s={}&v={API_VERSION}&c={CLIENT_NAME}&f=json",
             escape::component(&username),
@@ -76,7 +90,7 @@ impl SubsonicClient {
         Ok(Self {
             client,
             username,
-            http: reqwest::Client::new(),
+            http,
             covers,
             playback_report: Arc::default(),
         })

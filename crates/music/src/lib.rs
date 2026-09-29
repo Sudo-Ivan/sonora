@@ -20,6 +20,7 @@ mod sink;
 mod spectrum;
 mod stream;
 pub mod subsonic;
+pub mod tls;
 mod trim;
 pub mod trouble;
 pub mod youtube;
@@ -516,6 +517,9 @@ pub enum SignIn {
         server: String,
         username: String,
         password: String,
+        /// Whether to accept a certificate the system roots reject, for a self-hosted server
+        /// running a self-signed one.
+        insecure_tls: bool,
     },
 }
 

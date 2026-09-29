@@ -15,6 +15,9 @@ pub struct Credentials {
     /// cover keeps one url across launches and the image caches can hold it.
     #[serde(default)]
     pub signature: Option<Signature>,
+    /// Whether the server answered with a certificate the user chose to accept anyway.
+    #[serde(default)]
+    pub insecure_tls: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,5 +75,10 @@ pub fn store(stored: &Credentials) -> Result<()> {
 }
 
 pub fn forget() {
+    if let Some(remembered) = load()
+        && let Some(authority) = crate::tls::authority(&remembered.server)
+    {
+        crate::tls::distrust(authority);
+    }
     credentials::remove(&path());
 }

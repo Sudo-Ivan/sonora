@@ -78,9 +78,18 @@ pub enum Link {
 #[derive(Clone, Debug)]
 pub enum Secret {
     None,
-    Keys { key: String, secret: String },
+    Keys {
+        key: String,
+        secret: String,
+    },
     Token(String),
-    Server { url: String, key: String },
+    Server {
+        url: String,
+        key: String,
+        /// Whether to accept a certificate the system roots reject, for a self-hosted server
+        /// running a self-signed one.
+        insecure_tls: bool,
+    },
 }
 
 /// A linked scrobbling account, both as `Service::connect` returns it and as `settings.json`
@@ -105,6 +114,9 @@ pub struct Account {
     /// What the settings row calls the account.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub name: String,
+    /// Whether the server's certificate is accepted without verification, for a self-hosted
+    /// server running a self-signed one.
+    pub insecure_tls: bool,
     pub enabled: bool,
 }
 

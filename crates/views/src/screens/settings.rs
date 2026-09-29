@@ -25,7 +25,7 @@ use state::{
 };
 use ui::{ActiveTheme as _, Deck, LEADING, Scrollbar, Scroller, eyebrow, snapped};
 use ui::{
-    Avatar, Button, Dismiss, InfoCard, Initials, Input, Look, MAX_FONT, MAX_LYRICS_SCALE,
+    Avatar, Button, Checkbox, Dismiss, InfoCard, Initials, Input, Look, MAX_FONT, MAX_LYRICS_SCALE,
     MAX_TRANSPARENCY, MIN_FONT, MIN_LYRICS_SCALE, MenuItem, Modal, Pace, Picker, Popovers, Radio,
     Rounding, Saver, Scrubber, ScrubberState, Separator, Skeleton, Stillness, Switch, TabBar, Text,
     Theme, ThemeKind, Vacancy, VisualizerStyle,
@@ -271,11 +271,15 @@ pub struct SettingsView {
     username: Entity<Input>,
     password: Entity<Input>,
     credentials_for: Option<&'static str>,
+    /// Whether the credentials dialog's certificate opt-out is on.
+    insecure_tls: bool,
     secret: Entity<Input>,
     manual_secret: Option<(&'static str, &'static str)>,
     scrobbling: Entity<Scrobbling>,
     scrobble_first: Entity<Input>,
     scrobble_second: Entity<Input>,
+    /// Whether the scrobbling link dialog's certificate opt-out is on.
+    scrobble_insecure: bool,
     /// The service whose link dialog is open, by slug.
     scrobble_prompt: Option<&'static str>,
     /// The provider whose sign-in choice is up, by slug and name.
@@ -370,6 +374,7 @@ impl SettingsView {
             username: cx.new(|cx| Input::new("login-username-hint", cx)),
             password: cx.new(|cx| Input::new("login-password-hint", cx).masked()),
             credentials_for: None,
+            insecure_tls: false,
             secret: cx.new(|cx| Input::new("login-cookie-hint", cx)),
             manual_secret: None,
             sign_in_for: None,
@@ -380,6 +385,7 @@ impl SettingsView {
             scrobbling,
             scrobble_first: cx.new(|cx| Input::new("settings-scrobble-key", cx)),
             scrobble_second: cx.new(|cx| Input::new("settings-scrobble-secret", cx)),
+            scrobble_insecure: false,
             scrobble_prompt: None,
             languages,
             typefaces,
@@ -2899,10 +2905,12 @@ impl SettingsView {
             Link::Server => Secret::Server {
                 url: first,
                 key: second,
+                insecure_tls: self.scrobble_insecure,
             },
         };
 
         self.scrobble_prompt = None;
+        self.scrobble_insecure = false;
         self.scrobbling
             .update(cx, |scrobbling, cx| scrobbling.connect(service, secret, cx));
     }
@@ -2936,6 +2944,18 @@ impl SettingsView {
                 .child(self.scrobble_first.clone())
                 .when(link != Link::Token, |this| {
                     this.child(self.scrobble_second.clone())
+                })
+                .when(link == Link::Server, |this| {
+                    let insecure_tls = self.scrobble_insecure;
+                    this.child(
+                        Checkbox::new("settings-scrobble-insecure-tls", insecure_tls)
+                            .label(t!("login-server-insecure"))
+                            .text_color(cx.theme().muted_foreground)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.scrobble_insecure = !insecure_tls;
+                                cx.notify();
+                            })),
+                    )
                 }),
         )
         .when_some(signup, |this, url| {
@@ -2963,6 +2983,7 @@ impl SettingsView {
 
     fn close_scrobble(&mut self, cx: &mut Context<Self>) {
         self.scrobble_prompt = None;
+        self.scrobble_insecure = false;
         cx.notify();
     }
 
@@ -3359,6 +3380,7 @@ impl SettingsView {
 
     fn clear_credentials(&mut self, cx: &mut Context<Self>) {
         self.credentials_for = None;
+        self.insecure_tls = false;
         self.server.update(cx, |input, cx| input.set_text("", cx));
         self.username.update(cx, |input, cx| input.set_text("", cx));
         self.password.update(cx, |input, cx| input.set_text("", cx));
@@ -3379,6 +3401,7 @@ impl SettingsView {
         if server.trim().is_empty() || username.trim().is_empty() || password.is_empty() {
             return;
         }
+        let insecure_tls = self.insecure_tls;
         self.clear_credentials(cx);
         self.session.update(cx, |session, cx| {
             session.sign_in(
@@ -3387,6 +3410,7 @@ impl SettingsView {
                     server,
                     username,
                     password,
+                    insecure_tls,
                 },
                 cx,
             )
@@ -3394,12 +3418,22 @@ impl SettingsView {
     }
 
     fn credentials_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let insecure_tls = self.insecure_tls;
         Modal::new("settings-server-prompt", t!("login-server-title"))
             .w(px(560.))
             .detail(t!("login-server-detail"))
             .child(self.server.clone())
             .child(self.username.clone())
             .child(self.password.clone())
+            .child(
+                Checkbox::new("settings-server-insecure-tls", insecure_tls)
+                    .label(t!("login-server-insecure"))
+                    .text_color(cx.theme().muted_foreground)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.insecure_tls = !insecure_tls;
+                        cx.notify();
+                    })),
+            )
             .action(
                 Button::new("settings-cancel-server")
                     .ghost()
