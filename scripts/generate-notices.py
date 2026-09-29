@@ -17,19 +17,19 @@ PREAMBLE = """# Third-party licenses
 Sonora is licensed under the GNU General Public License v3.0 or later; the full
 text is in `COPYING`. GPUI pulls in `zlog`, `ztracing` and `ztracing_macro` from
 the Zed repository, which carry the same license. The complete corresponding
-source is the tagged commit of <https://github.com/sonorahq/sonora> together
+source is the tagged commit of <https://github.com/Sudo-Ivan/sonora> together
 with the dependency revisions pinned in `Cargo.lock`.
 
 The binary embeds:
 
-- Inter — SIL Open Font License 1.1, `assets/fonts/LICENSE.txt`
-- Lucide icons — ISC License, `assets/icons/lucide/LICENSE`
-- Iconoir — MIT License, `assets/icons/iconoir/LICENSE`
-- Remix Icon 4.8.0 — Apache License 2.0, `assets/icons/remix/LICENSE`
-- Solar Icon Set, Linear style — CC BY 4.0 by 480 Design, `assets/icons/solar/LICENSE`
-- Simple Icons brand marks — CC0 1.0, `assets/icons/common/LICENSE`
+- Inter - SIL Open Font License 1.1, `assets/fonts/LICENSE.txt`
+- Lucide icons - ISC License, `assets/icons/lucide/LICENSE`
+- Iconoir - MIT License, `assets/icons/iconoir/LICENSE`
+- Remix Icon 4.8.0 - Apache License 2.0, `assets/icons/remix/LICENSE`
+- Solar Icon Set, Linear style - CC BY 4.0 by 480 Design, `assets/icons/solar/LICENSE`
+- Simple Icons brand marks - CC0 1.0, `assets/icons/common/LICENSE`
 
-Several dependencies are covered by the Mozilla Public License 2.0 — notably the
+Several dependencies are covered by the Mozilla Public License 2.0 - notably the
 Symphonia decoders, `option-ext` and `priority-queue`. They are used unmodified;
 their source is available from the upstream repositories linked below and from
 <https://crates.io>.
@@ -95,7 +95,7 @@ def collect(report):
 def render(report, groups):
     out = [PREAMBLE, "## Summary\n"]
     for row in report["overview"]:
-        out.append(f"- {row['name']} — {row['count']} crate(s)")
+        out.append(f"- {row['name']} - {row['count']} crate(s)")
     out.append("")
 
     for row in report["overview"]:
@@ -106,7 +106,7 @@ def render(report, groups):
             user = group["users"][key]
             line = f"- {link(user['crate'])}"
             if user["notices"]:
-                line += " — " + "; ".join(user["notices"])
+                line += " - " + "; ".join(user["notices"])
             out.append(line)
         out.append("")
         body = dedent(group["text"]).strip("\n")

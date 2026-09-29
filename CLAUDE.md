@@ -19,18 +19,16 @@ crates/
   icons/      the icon packs: registry, active pack, path resolution, AssetSource
   embed/      build-script helper that walks a folder and writes include_bytes! literals
   webview/    a native browser window over a throwaway session, for cookie sign-ins and PO tokens
-  widevine/   the Widevine CDM host, pssh and CENC fMP4 parsing, for any DRM'd provider
 ```
 
 Dependency direction is strict. Do not create a back edge:
 
 ```
-sonora → views → state → music
-         state, music → storage
-         state → webview
-         music → widevine
-         all ui-side crates → ui, router, input → ui → gpui
-         every ui-side crate → i18n, icons → gpui
+sonora -> views -> state -> music
+         state, music -> storage
+         state -> webview
+         all ui-side crates -> ui, router, input -> ui -> gpui
+         every ui-side crate -> i18n, icons -> gpui
 ```
 
 - `state` and `views` see only the traits and models in the root of `music`, never a provider
@@ -40,10 +38,7 @@ sonora → views → state → music
 - `music::engine` is the one playback engine and `music::stream` the one progressive download. A
   provider implements `engine::Fetch` and `stream::Body` rather than writing its own. The engine
   applies loudness normalisation, so a provider only reports a track's level through
-  `Fetch::loudness`. Spotify is the one exception, because librespot decodes and normalises
-  inside its own player.
-- `music::drm` is the only way `state` and `views` reach protected playback. The CDM is never
-  shipped in any artefact or package.
+  `Fetch::loudness`.
 
 ## Rules
 
@@ -51,11 +46,8 @@ sonora → views → state → music
   `crates/views/src/chrome/` first, and extend an element with a builder method rather than
   writing a sibling. New elements copy the shape of `ui/src/button.rs`, including the
   `mem::take` and `refine` of caller styles.
-- **Never call the Spotify Web API.** No `reqwest` to `api.spotify.com`, no client secret, no
-  `rspotify`. Spotify data comes from librespot's `spclient`, and auth uses Spotify's own client id
-  in `auth.rs`.
 - **Never hardcode a color, radius or size.** Read them from `cx.theme()` and `theme.metrics`. A
-  literal `px(…)` is allowed only for a local, non-scaling detail declared as a module `const`. A
+  literal `px(...)` is allowed only for a local, non-scaling detail declared as a module `const`. A
   new color token goes into `Theme`, every `Theme::*()` constructor, `ThemeOverrides` and
   `apply_color!`.
 - **Never write a bare breakpoint.** Use the `ui::Room` ladder, and classify width with
@@ -63,8 +55,8 @@ sonora → views → state → music
   width observes `Chrome::entity(cx)`.
 - **Every user-facing string comes from Fluent.** Add the key to `assets/i18n/en-US/main.ftl`. Other
   locales may lag. Never call `t!` in a constructor: store the key and resolve it in `render`.
-  Counts use Fluent selectors. Log messages and `.context(…)` stay in English.
-- **Network work runs on tokio.** Anything touching `MusicApi`, librespot or sockets goes inside
+  Counts use Fluent selectors. Log messages and `.context(...)` stay in English.
+- **Network work runs on tokio.** Anything touching `MusicApi` or sockets goes inside
   `Io::global(cx).spawn`, awaited from `cx.spawn` and applied in `this.update` ending with
   `cx.notify()`. Store the returned `Task` in a field and never detach a data load. Network-backed
   features belong in a `state` entity, not a view. An entity that caches provider data clears on
@@ -93,7 +85,7 @@ cargo clippy --workspace --all-targets
 The devShell has no `cargo` or `cargo-clippy`; those come from the system profile. The flake
 packages the released binary only, so `nix build` never sees the working tree.
 `.cargo/config.toml` links with mold on `x86_64-unknown-linux-gnu`, so mold must be on PATH, or
-build with `RUSTFLAGS=""`. `crates/widevine` compiles C++, so a C++ compiler is needed too.
+build with `RUSTFLAGS=""`.
 
 Clippy is clean, `--all-targets` included, and stays that way. Boxed callback fields get a
 module-local `type` alias rather than a `type_complexity` warning. The one `#[allow]` is
@@ -107,9 +99,9 @@ module-local `type` alias rather than a `type_complexity` warning. The one `#[al
   (`use ui::ActiveTheme as _;`).
 - Module order: `use` block, `const`s, types, impls, private free helpers at the bottom.
 - In render, prefer `.when()`, `.when_some()` and `.map()` over branching. Two-arm boolean choices
-  use `match flag { true => …, false => … }`. Use let-else and return early.
-- `anyhow::Result` at boundaries with lowercase `.context("cannot …")`. Logs are prefixed by
-  subsystem (`"playback: …"`).
+  use `match flag { true => ..., false => ... }`. Use let-else and return early.
+- `anyhow::Result` at boundaries with lowercase `.context("cannot ...")`. Logs are prefixed by
+  subsystem (`"playback: ..."`).
 - Dependencies go in the root `[workspace.dependencies]`. `gpui` and `gpui_platform` are pinned to
   one git rev and move together.
 
@@ -136,5 +128,6 @@ Bullets are lowercase, imperative, one line each, and describe behaviour rather 
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add to
 `## [Unreleased]` as features land, under `Added`, `Changed` or `Fixed`. Entries say what someone
-using Sonora can now do, in one or two short sentences, since the notes are posted to Discord.
-Leave out work no user can observe. Cutting a release is the `release-sonora` skill.
+using Sonora can now do, in one or two short sentences, since the notes go into the release.
+Leave out work no user can observe. Cutting a release is pushing a `v*` tag;
+`.github/workflows/release.yml` builds, attests and publishes it.

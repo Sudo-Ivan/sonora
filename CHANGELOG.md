@@ -7,6 +7,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Subsonic and Maloja servers running self-signed certificates now work: the sign-in and
+  scrobble dialogs carry a "Trust a self-signed or otherwise invalid certificate" option, which
+  relaxes verification for that server's address only, covers the API, the streams and the cover
+  art, and is remembered with the account.
+- On Linux, Sonora sandboxes itself with Landlock: it can only write its own data and config
+  directories and your configured music folders, and only read the system directories it needs.
+  Set SONORA_SANDBOX=0 to disable it.
+- Start mix on a track builds a queue from your library with a local scorer - shared artists,
+  albums, genres and era, spread so one artist cannot take over.
+- A Forever toggle on the queue keeps filling it with library picks, skipping what you played
+  recently, so the music never runs out.
+- Subsonic playlists now show when they last changed and who owns them, albums carry release
+  dates, and radio uses the server's sonicSimilarity extension when it offers one.
+
+### Removed
+
+- Spotify and Apple Music providers, along with the librespot and Widevine dependencies.
+- Discord Rich Presence, together with the Deezer cover lookup and the per-track publicity
+  plumbing that existed only to feed it.
+- The one-time installation report. Sonora now sends no telemetry anywhere.
+
 ## [0.41.0] - 2026-09-28
 
 ### Added
@@ -263,7 +286,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A Deezer song whose explicit flag arrives as a number still shows the explicit mark.
 - An untagged song whose filename splits title and artist with a fullwidth hyphen keeps both
   names, instead of treating the whole filename as the title.
-- Opening a `file:///C:/…` link on Windows plays the file, instead of looking for a path that
+- Opening a `file:///C:/...` link on Windows plays the file, instead of looking for a path that
   starts with a slash.
 - The Play button on a library page no longer sits on Loading while the track you left off on is
   being made ready to resume.
@@ -626,7 +649,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Closing the window no longer stops the music: Sonora stays in the system tray with play/pause,
   previous, next, show and quit at hand, and the Dock icon steps aside on macOS until the window
-  is back. Turn it off under Settings → General → Window if you would rather it quit.
+  is back. Turn it off under Settings -> General -> Window if you would rather it quit.
 - Sonora speaks Spanish. Pick Español under Settings > General > Language, or leave the language on
   System and it follows a Spanish desktop on its own.
 - Sonora speaks Japanese. Pick 日本語 under Settings > General > Language, or leave the language on
@@ -1025,7 +1048,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   place from its leading edge, so the text is measured and drawn once instead of once per frame, and
   every line reserves the room the sung one needs, so becoming the sung line moves nothing around it.
 - The word-by-word highlight no longer slips backwards inside a word. Lyrics providers split a word
-  where it is sung in two — "nothing" arrives as "no" and "thing" — and the soft trail the highlight
+  where it is sung in two - "nothing" arrives as "no" and "thing" - and the soft trail the highlight
   carries hardened at every one of those boundaries and softened again on the next, which moved the
   visible edge back about half a character. The trail now runs the whole way across a line and only
   sharpens as the line fills.
@@ -1294,10 +1317,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Background vocals in parentheses render as their own smaller line beneath the verse, with their
   own timing, and standalone echo lines attach to the verse they answer.
 - Lyrics in Japanese, Chinese, Korean, Cyrillic, Greek or Arabic can show a romanized
-  pronunciation line, switchable per writing system in Settings → Playback.
+  pronunciation line, switchable per writing system in Settings -> Playback.
 - Long instrumental breaks show notes in the lyrics panel that light up as the break plays out;
   clicking them seeks to the start of the break.
-- Karaoke word highlighting can be turned off in Settings → Playback.
+- Karaoke word highlighting can be turned off in Settings -> Playback.
 - Word-synced lyrics appear as soon as the first provider answers instead of waiting for the
   slowest one.
 - Windows releases ship an installer alongside the portable binary.
@@ -1354,7 +1377,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The play overlay and cover darkening now really do appear on queue rows — the artwork was
+- The play overlay and cover darkening now really do appear on queue rows - the artwork was
   painted over them.
 - Long single-artist names in a table are cut with an ellipsis instead of being sliced mid-letter.
 
@@ -1366,7 +1389,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Track rows look and behave the same everywhere — queue, search results and quick picks share
+- Track rows look and behave the same everywhere - queue, search results and quick picks share
   one entry: artwork with a play overlay on hover, a hover-underlined title, artist links, and in
   the queue a remove button on the right.
 - Album, playlist and artist cards are built from one shared piece, so shelves, the library grid
@@ -1374,14 +1397,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- The play overlay on track rows appears when you point at the row — including the queue, where it
-  never showed — and its tooltip no longer pops over rows that are not being pointed at.
+- The play overlay on track rows appears when you point at the row - including the queue, where it
+  never showed - and its tooltip no longer pops over rows that are not being pointed at.
 - Clicking the play control on a paused track resumes it from where it stopped; quick picks and
   search used to restart the track from the beginning.
-- Queue rows no longer vanish abruptly inside the edge fade — they now dissolve with it — and the
+- Queue rows no longer vanish abruptly inside the edge fade - they now dissolve with it - and the
   queue scrollbar is no longer dimmed by that fade.
 - The library says when a section failed to load instead of presenting an empty table that looks
-  like an empty library, and it says so per section — songs can arrive while artists fail.
+  like an empty library, and it says so per section - songs can arrive while artists fail.
 - Removing a track from a playlist updates the playlist everywhere at once; the track count and
   the "Add to playlist" menu used to keep the old state until a full reload.
 - A failed search no longer leaves its error on screen after signing out.
@@ -1390,7 +1413,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - YouTube Music plays again. YouTube stopped serving the clients Sonora asked for: the download of
   every track was refused part-way through, and the fallback it tried next was refused outright. A
   signed-in session now streams through the YouTube Music client itself, which also hands over a
-  better stream — 256 kbps instead of 128. Without an account Sonora asks as a headset would, with a
+  better stream - 256 kbps instead of 128. Without an account Sonora asks as a headset would, with a
   visitor id issued by YouTube rather than one it made up.
 - Playing without a YouTube account says so once instead of failing track after track. YouTube now
   turns anonymous listeners away from most music, and Sonora used to work through the whole queue,
@@ -1408,20 +1431,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Appearance settings carry a Reduce motion choice — follow the system, always or never — so you can
+- Appearance settings carry a Reduce motion choice - follow the system, always or never - so you can
   decide up front whether Sonora animates its interface.
-- Appearance settings also carry an Animation speed choice — slow, standard or quick — that stretches
+- Appearance settings also carry an Animation speed choice - slow, standard or quick - that stretches
   or tightens every interface animation to taste.
 - Fullscreen is a real player now: large artwork that swaps to the album's high-resolution cover as
   soon as it arrives, the track and its artists, a seek bar, transport controls, and a pill that
-  puts lyrics or the queue beside the artwork — the same lyrics and queue as the side panel, with
+  puts lyrics or the queue beside the artwork - the same lyrics and queue as the side panel, with
   everything they can do. On a narrow window the chosen panel takes over the whole body instead.
   Press `f` to go fullscreen and Escape to come back to wherever you were.
 - Lyrics read like a stage now: the lines around the one being sung are softly blurred, the line
   under the pointer sharpens as you reach for it, and the top and bottom of the list fade out
   instead of being cut off. Hovering a line still seeks to it.
 - Appearance settings gained an Advanced group, starting with an adaptive context menu. Turned on,
-  a track's menu leaves out what the row already shows — its album or its artist. It ships off.
+  a track's menu leaves out what the row already shows - its album or its artist. It ships off.
 
 ### Changed
 
@@ -1430,8 +1453,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Long lists, grids and the home shelves cost far less to draw, so scrolling them stays smooth
   where it used to stutter. Sorting and filtering a large library got cheaper too.
 - A sign-in that fails now explains itself in plain words on a small card, on the login screen and in
-  account settings — being outside your account country, an expired session, no connection, a
-  cancelled browser approval — instead of showing the raw message from the streaming library. An
+  account settings - being outside your account country, an expired session, no connection, a
+  cancelled browser approval - instead of showing the raw message from the streaming library. An
   unrecognised failure is trimmed down to one readable sentence too.
 
 ### Fixed
@@ -1441,7 +1464,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   session and explains on the login screen that streaming needs Premium.
 - The volume percentage now sits above the slider handle instead of trailing the pointer, so it
   reads as a label on the handle you are dragging.
-- A shelf on home — Your Mood Mixes — arrived from Spotify with no names and no covers and drew as a
+- A shelf on home - Your Mood Mixes - arrived from Spotify with no names and no covers and drew as a
   row of blank cards. Those mixes are now filled in from the playlists themselves, in the background,
   so the rest of home appears straight away.
 - The window buttons on macOS sat in the wrong place.
@@ -1524,8 +1547,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Search now opens on a grid of genres, and every genre leads to its own page of playlists, albums
   and sub-genres, in cards or in a compact list.
-- The home page carries a feed from the service you are signed in to — daily and artist mixes,
-  editorial playlists and discovery shelves — with placeholder shelves while it loads, so the page
+- The home page carries a feed from the service you are signed in to - daily and artist mixes,
+  editorial playlists and discovery shelves - with placeholder shelves while it loads, so the page
   is useful before you like a single song.
 - German and French translations.
 - The language picker has a search field, so a language is one keystroke away instead of a scroll.
@@ -1556,7 +1579,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Importing a YouTube Music session, or pasting cookies, now asks which Google account to use when
   the session is signed in to more than one, and Sonora stays on the account that was picked.
-- The "Paste cookies manually" dialog spells out where the value comes from — which request to open
+- The "Paste cookies manually" dialog spells out where the value comes from - which request to open
   in the developer tools, which header to copy, and which cookies the value has to carry.
 
 ### Changed
@@ -1575,8 +1598,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   showing the track length. Names below a title appear only where the song is shared with someone
   else. A button in the toolbar switches the section back to the old table, and the choice is
   remembered.
-- The card deck keeps one height whatever it holds — a short last page leaves empty rows instead of
-  shrinking — and quick picks on the home screen now mixes 30 songs to fill it.
+- The card deck keeps one height whatever it holds - a short last page leaves empty rows instead of
+  shrinking - and quick picks on the home screen now mixes 30 songs to fill it.
 - The artist page reads as an overview: the table view lists five songs and expands to ten, releases
   show two rows and expand to the whole discography, and the artist's biography closes the page in
   the same card the song page uses.
@@ -1597,12 +1620,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restarted, and cancelling now shuts the callback server down. Signing in again used to fail with
   "Address already in use" until Sonora was restarted.
 - Cancelling a sign-in no longer flashes the empty library behind the login screen.
-- Artwork that does not arrive square — an artist portrait, a cover embedded in a local file — is
+- Artwork that does not arrive square - an artist portrait, a cover embedded in a local file - is
   cropped to its middle instead of spilling out of its frame, so a round portrait is round again.
 - A pinned table header no longer trembles by a pixel while the page scrolls, and the wheel now
   works over the header and over a column edge instead of stopping there.
-- An artist page lists the whole discography — every album, single, compilation and alternate
-  edition such as a deluxe or anniversary release — instead of only the most recent releases.
+- An artist page lists the whole discography - every album, single, compilation and alternate
+  edition such as a deluxe or anniversary release - instead of only the most recent releases.
 
 ## [0.10.0] - 2026-08-12
 
@@ -1613,8 +1636,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   there across restarts, reorders by dragging, and opens a context menu that matches what it is.
 - Playlists that arrive without artwork get a cover of their own, stitched together from the first
   four tracks and kept on disk so it is built only once.
-- Content cards carry a play control on their artwork — a button in the corner of a tile, a dimmed
-  cover on a row — and it stays visible while that item is playing.
+- Content cards carry a play control on their artwork - a button in the corner of a tile, a dimmed
+  cover on a row - and it stays visible while that item is playing.
 - The left sidebar scrolls once its contents outgrow the panel.
 - Local music reads more formats, gains its own toolbar, and keeps the list header in place while
   scrolling.
@@ -1657,13 +1680,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Sonora can now sign in to YouTube Music as an alternative to Spotify. The login screen offers
   both services; YouTube Music can be browsed as a guest, connected by importing an existing
-  browser session, or connected by pasting cookies, and the whole library — liked songs,
-  playlists, albums, artists, search, and radio — works through the same interface.
+  browser session, or connected by pasting cookies, and the whole library - liked songs,
+  playlists, albums, artists, search, and radio - works through the same interface.
 - The general settings gain a "Manage accounts" section: every service is listed with its own sign
   out, switching to a service already connected takes effect immediately, and a service that is not
-  connected yet offers its sign-in options right there — including importing from a named browser.
+  connected yet offers its sign-in options right there - including importing from a named browser.
 - The login screen puts each service in its own column with guest mode below them, and importing a
-  YouTube Music session asks which browser to read it from — Firefox, Zen, LibreWolf, Floorp,
+  YouTube Music session asks which browser to read it from - Firefox, Zen, LibreWolf, Floorp,
   Waterfox, Mullvad, Tor, Pale Moon, Basilisk, SeaMonkey, Chrome, Chromium, Brave, Edge, Vivaldi,
   Opera, Yandex, Arc, Thorium and Helium are recognised, including Flatpak and Snap installs.
 - YouTube Music albums and playlists play the album audio of a song rather than its music video, so
@@ -1911,7 +1934,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Initial release: a native Spotify client with playback, an interactive queue, the saved library,
 search, album, playlist, artist and song pages, context menus and adaptive theming.
 
-[unreleased]: https://github.com/sonorahq/sonora/compare/v0.41.0...HEAD
+[unreleased]: https://github.com/Sudo-Ivan/sonora/compare/v0.41.0...HEAD
 [0.41.0]: https://github.com/sonorahq/sonora/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/sonorahq/sonora/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/sonorahq/sonora/compare/v0.38.0...v0.39.0

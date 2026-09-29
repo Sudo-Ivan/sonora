@@ -2,38 +2,31 @@
 
 Sonora does not require an account and does not operate a service that stores users' music libraries, listening history, streaming credentials, or personal profiles.
 
-## Installation count
-
-Sonora sends an optional one-time installation report to our installation counter in order to estimate how many installations of the application have occurred.
-
-The report only contains:
-
-- application version
-- operating system
-
-Sonora does not assign an installation identifier, device identifier, streaming account identifier, listening history, music library information, or other application data in this request.
-
-The installation report is enabled by default. Users may opt out at their discretion. Opting out does not affect Sonora's functionality.
-
-As the case with any network request, hosting and network infrastructure (Cloudflare) may process standard connection metadata such as an IP address as necessary to deliver the request. Sonora does not include the IP address in the telemetry payload or use it as an application identifier.
+Sonora sends no telemetry, analytics, or installation reports anywhere.
 
 ## Streaming and third-party services
 
-When you use Spotify, YouTube Music, lyrics providers, or other online integrations, Sonora communicates with those third-party services as necessary to provide the requested functionality.
+When you use YouTube Music, Deezer, lyrics providers, or other online integrations, Sonora communicates with those third-party services as necessary to provide the requested functionality.
 
 Data handled by those services is subject to their respective privacy policies and terms.
+
+## Self-hosted servers
+
+Subsonic/OpenSubsonic and Maloja servers are often self-hosted and reached over HTTPS with a self-signed certificate. If you choose "Trust a self-signed or otherwise invalid certificate" when connecting to one, Sonora skips certificate verification for that server's address only. The connection stays encrypted, but the certificate is not verified, so only enable it for a server you control.
 
 ## Authentication credentials
 
 Authentication credentials used by Sonora are stored locally on the user's device.
 
-Sonora does not transmit Spotify or YouTube Music credentials to Sonora-operated servers.
+Sonora does not transmit streaming-service credentials to Sonora-operated servers.
 
 Credentials are sent only to the relevant third-party service when required for authentication or API requests.
 
 ## Local data
 
 Sonora stores application data locally on the user's device, including settings, playback state, provider credentials, local-library information, and other application state required for the application to function correctly.
+
+On Linux, the running process also restricts itself with a Landlock filesystem sandbox, so it can only write its own directories and the configured music folders and only read the system directories it needs.
 
 ## Logs
 
@@ -51,4 +44,4 @@ Material changes to this privacy policy will be published in the Sonora source r
 
 Privacy-related questions may be submitted through the Sonora GitHub repository:
 
-https://github.com/sonorahq/sonora
+https://github.com/Sudo-Ivan/sonora

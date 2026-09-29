@@ -220,7 +220,7 @@
             inherit (release) version;
 
             src = pkgs.fetchurl {
-              url = "https://github.com/sonorahq/sonora/releases/download/v${release.version}/sonora-v${release.version}-${asset.target}${
+              url = "https://github.com/Sudo-Ivan/sonora/releases/download/v${release.version}/sonora-v${release.version}-${asset.target}${
                 if pkgs.stdenv.hostPlatform.isDarwin then ".dmg" else ""
               }";
               inherit (asset) hash;

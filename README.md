@@ -2,16 +2,14 @@
 
 # Sonora
 
-[![Build](https://img.shields.io/github/actions/workflow/status/sonorahq/sonora/release.yml?style=flat-square&label=build)](https://github.com/sonorahq/sonora/actions/workflows/release.yml)
-[![License](https://img.shields.io/github/license/sonorahq/sonora?style=flat-square&label=license)](./COPYING)
-![Installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fsonora-stats.nolight.dev%2Fcount&query=%24.count&label=Installs&color=blue&style=flat-square)
-\
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/a8N8Tx23rV)
-[![Matrix](https://img.shields.io/badge/Matrix-000000?style=for-the-badge&logo=matrix&logoColor=white)](https://matrix.to/#/#sonora:nolight.dev)
+[![Build](https://img.shields.io/github/actions/workflow/status/Sudo-Ivan/sonora/release.yml?style=flat-square&label=build)](https://github.com/Sudo-Ivan/sonora/actions/workflows/release.yml)
+[![License](https://img.shields.io/github/license/Sudo-Ivan/sonora?style=flat-square&label=license)](./COPYING)
 
 ### A native music streaming client, built with Rust and GPUI
 
-Stream from your favorite services and play local files — all in one **native** app.
+Stream from your favorite services and play local files - all in one **native** app.
+
+A fork of [sonorahq/sonora](https://github.com/sonorahq/sonora); see [FORK.md](FORK.md) for what differs.
 </div>
 
 <div align="center">
@@ -48,25 +46,22 @@ Stream from your favorite services and play local files — all in one **native*
 
 ## Features
 
-* **Apple Music, Spotify, YouTube Music, Deezer, Subsonic/Navidrome** and local playback
+* **YouTube Music, Deezer, Subsonic/Navidrome** and local playback
 * Gapless playback, audio normalization, shuffle, sleep timer
 * Synced/karaoke lyrics, background vocals, and romanization
 * Scrobbling with LastFM, ListenBrainz, LibreFM, and Maloja
+* Self-hosted servers work over HTTPS with self-signed certificates
 * Themes, fonts, icons, transparency, blur, and window styling
-* Discord Rich Presence, native file opening
+* Native file opening
 * macOS, Windows, Linux, and (probably) FreeBSD support
+* No telemetry
 
 ## Installation
 
 ### macOS
 
-Install with [Brew](https://brew.sh/):
-
-```sh
-brew install --cask nolight132/tap/sonora
-```
-
-After installing (thanks Apple):
+Download the disk image from the
+[latest release](https://github.com/Sudo-Ivan/sonora/releases/latest), then:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Sonora.app
@@ -74,35 +69,18 @@ xattr -dr com.apple.quarantine /Applications/Sonora.app
 
 ### Linux
 
-#### Arch
-
-Install from the AUR with your AUR helper of choice:
-
-```sh
-yay -S sonora-bin
-```
-
-`sonora-bin` installs the prebuilt release binary. `sonora` builds the same version from source
-instead, which takes a while on a Rust and GPUI tree but links against your own system libraries:
-
-```sh
-yay -S sonora
-```
-
-Either `pipewire-alsa` or `pulseaudio-alsa` is required, matching your sound server.
-
 #### Flatpak
 
 Add the Sonora repository (updates with `flatpak update`):
 
 ```sh
-flatpak install --user https://sonorahq.github.io/sonora/sonora.flatpakref
+flatpak install --user https://sudo-ivan.github.io/sonora/sonora.flatpakref
 ```
 
 #### AppImage
 
 Download the `x86_64` AppImage from the
-[latest release](https://github.com/sonorahq/sonora/releases/latest), make it executable and run
+[latest release](https://github.com/Sudo-Ivan/sonora/releases/latest), make it executable and run
 it:
 
 ```sh
@@ -121,7 +99,7 @@ for you.
 The flake packages the latest tagged release binary or builds from source if unavailable for your platform.
 
 ```nix
-inputs.sonora.url = "github:sonorahq/sonora";
+inputs.sonora.url = "github:Sudo-Ivan/sonora";
 ```
 
 ```text
@@ -149,37 +127,25 @@ You can set configuration options via the included Home Manager module under `pr
 
 #### Installer
 
-Download and run the [installer](https://github.com/sonorahq/sonora/releases/latest/download/Sonora-Setup.exe),
-or the [ARM installer](https://github.com/sonorahq/sonora/releases/latest/download/Sonora-Setup-arm64.exe)
+Download and run the [installer](https://github.com/Sudo-Ivan/sonora/releases/latest/download/Sonora-Setup.exe),
+or the [ARM installer](https://github.com/Sudo-Ivan/sonora/releases/latest/download/Sonora-Setup-arm64.exe)
 on Windows on ARM.
 
 #### Portable
 
-Download the latest `windows-msvc.exe` for your architecture from [Releases](https://github.com/sonorahq/sonora/releases/latest).
+Download the latest `windows-msvc.exe` for your architecture from [Releases](https://github.com/Sudo-Ivan/sonora/releases/latest).
 
-## Community
+## Provenance
 
-Feel free to join our [Discord](https://discord.gg/a8N8Tx23rV) server and [Matrix](https://matrix.to/#/#sonora:nolight.dev) space.
-Discord is the primary one, but we do have a Matrix bridge.
+Every release is built by GitHub Actions from the tagged commit, and each binary carries an
+[artifact attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations)
+you can verify:
 
-## AI policy
+```sh
+gh attestation verify sonora-v0.41.0-x86_64-unknown-linux-gnu --repo Sudo-Ivan/sonora
+```
 
-We have nothing against the usage of LLMs in the project — in fact, we use them ourselves.
-We believe that AI can speed up development in a lot of meaningful ways and be a useful
-tool for learning new concepts. We have also found it particularly helpful for
-contributing to substantial codebases such as GPUI and librespot, where it has helped
-us quickly locate the relevant parts of the code.
-
-**However**, using AI cannot act as an excuse for failing to
-understand, review, and test the changes proposed. Furthermore, we expect communication
-with a real person, not a computer. This includes but is not limited to PR/issue text
-generation, comments in discussions, etc. A short summary of minor changes can be
-generated and does not need to be disclosed explicitly, but the reasoning and motivation
-behind a change must come from the contributor and reflect their own understanding.
-
-Note that PRs that fail to adhere to these requirements may be rejected without further notice.
-
-AI-assisted proofreading and translation of human-written text are permitted.
+Releases are published once and never modified afterwards.
 
 ## Translations
 
@@ -187,43 +153,29 @@ AI-assisted proofreading and translation of human-written text are permitted.
 
 | Language | Translated | Coverage |
 | --- | --- | --- |
-| English (`en-US`) | 747/747 | 100% |
-| Deutsch (`de`) | 629/747 | 84% |
-| Español (`es`) | 691/747 | 93% |
-| Français (`fr`) | 628/747 | 84% |
-| Italiano (`it`) | 606/747 | 81% |
-| Bahasa Indonesia (`id`) | 606/747 | 81% |
-| 日本語 (`ja`) | 606/747 | 81% |
-| Русский (`ru`) | 712/747 | 95% |
-| Українська (`uk`) | 712/747 | 95% |
-| Polski (`pl`) | 712/747 | 95% |
-| Português (Brasil) (`pt-BR`) | 606/747 | 81% |
-| 简体中文 (`zh-CN`) | 606/747 | 81% |
-| Türkçe (`tr`) | 606/747 | 81% |
-| Shqip (`sq`) | 715/747 | 96% |
+| English (`en-US`) | 722/722 | 100% |
+| Deutsch (`de`) | 604/722 | 84% |
+| Español (`es`) | 666/722 | 92% |
+| Français (`fr`) | 603/722 | 84% |
+| Italiano (`it`) | 581/722 | 80% |
+| Bahasa Indonesia (`id`) | 581/722 | 80% |
+| 日本語 (`ja`) | 581/722 | 80% |
+| Русский (`ru`) | 687/722 | 95% |
+| Українська (`uk`) | 687/722 | 95% |
+| Polski (`pl`) | 687/722 | 95% |
+| Português (Brasil) (`pt-BR`) | 581/722 | 80% |
+| 简体中文 (`zh-CN`) | 581/722 | 80% |
+| Türkçe (`tr`) | 581/722 | 80% |
+| Shqip (`sq`) | 690/722 | 96% |
 
 <!-- i18n:end -->
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=sonorahq%2Fsonora&type=date&logscale=&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=sonorahq/sonora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=sonorahq/sonora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=sonorahq/sonora&type=date&legend=top-left" />
- </picture>
-</a>
 
 ## Credits
 
 Sonora is built with the help of some incredible open-source projects, including:
 
-- [Zed](https://github.com/zed-industries/zed) — a wonderful editor (~~ab~~)used by all core team members. Conveniently provides `gpui` — their native Rust rendering stack.
-- [librespot](https://github.com/librespot-org/librespot) — Spotify playback and library integration.
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — certain YouTube ideas implemented in [ytmusic-rs](https://github.com/sonorahq/ytmusic-rs) :)
-
-## Code signing
-Sonora has applied for code signing through SignPath Foundation. Current releases are not yet signed through SignPath Foundation. If approved, signed releases will use free code signing provided by SignPath.io, with a certificate by SignPath Foundation.
+- [Zed](https://github.com/zed-industries/zed) - a wonderful editor (~~ab~~)used by all core team members. Conveniently provides `gpui` - their native Rust rendering stack.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - certain YouTube ideas implemented in [ytmusic-rs](https://github.com/sonorahq/ytmusic-rs) :)
 
 ## License
 
@@ -231,9 +183,6 @@ Copyright (C) 2026 Sonora Contributors.
 
 Sonora is free software, released under the [GNU General Public License version
 3 or later](COPYING).
-
-Sonora is an unofficial client and is not affiliated with, endorsed by, or
-sponsored by Spotify AB.
 
 The binary also embeds the [Inter](https://github.com/rsms/inter) typeface (SIL
 Open Font License 1.1) and four interchangeable icon sets:

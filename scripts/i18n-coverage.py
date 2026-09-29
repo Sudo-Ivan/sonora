@@ -64,7 +64,7 @@ def table():
 def main():
     readme = README.read_text(encoding="utf-8")
     if START not in readme or END not in readme:
-        sys.exit(f"{README} has no {START} … {END} block")
+        sys.exit(f"{README} has no {START} ... {END} block")
 
     head, rest = readme.split(START, 1)
     _, tail = rest.split(END, 1)

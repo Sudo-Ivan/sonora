@@ -1,8 +1,7 @@
 # Contributing to Sonora
 
 Sonora is a native music streaming client, built with Rust and
-[GPUI](https://github.com/zed-industries/zed), streaming through
-[librespot](https://github.com/librespot-org/librespot). Linux is the platform we mainly
+[GPUI](https://github.com/zed-industries/zed). Linux is the platform we mainly
 develop against. Windows and macOS are built by CI but usually not exercised locally except for
 platform-specific features.
 
@@ -49,13 +48,13 @@ sudo dnf install @development-tools pkgconf-pkg-config mold \
 
 Three things that bite people:
 
-- **A Vulkan driver is a runtime requirement**, not just a build one — the GPUI renderer is
+- **A Vulkan driver is a runtime requirement**, not just a build one - the GPUI renderer is
   Vulkan-based, so the loader alone is not enough. `mesa-vulkan-drivers` covers AMD and Intel on
   Debian and Fedora; on Arch install `vulkan-radeon` or `vulkan-intel`. NVIDIA users need the
   proprietary driver (`nvidia-utils` on Arch).
-- **mold must be on `PATH`** — `.cargo/config.toml` passes `-fuse-ld=mold` for
-  `x86_64-unknown-linux-gnu`. Build with `RUSTFLAGS="" cargo build …` to drop it.
-- **The toolchain is pinned** — `rust-toolchain.toml` names the version and the components, so
+- **mold must be on `PATH`** - `.cargo/config.toml` passes `-fuse-ld=mold` for
+  `x86_64-unknown-linux-gnu`. Build with `RUSTFLAGS="" cargo build ...` to drop it.
+- **The toolchain is pinned** - `rust-toolchain.toml` names the version and the components, so
   [rustup](https://rustup.rs) fetches them on the first `cargo` command and every checkout builds
   and lints with the same compiler. A distribution's own `cargo` ignores the file and needs at least
   1.85, since the workspace is edition 2024 with resolver 3; Debian 12 (1.63) and Ubuntu 24.04 are
@@ -116,13 +115,8 @@ feel free to deviate.
 
 These are the ones reviews catch most often.
 
-**Never call the Spotify Web API.** All data comes from librespot's `spclient`. Don't add `reqwest`
-calls to `api.spotify.com`, a client secret, or `rspotify`. New endpoints go on the `MusicApi` trait
-in `crates/music/src/lib.rs` and are implemented in a focused module under `music/src/spotify/`. Although most
-Spotify functionality is probably already implemented by this point anyway.
-
 **A component probably already exists.** Grep `crates/ui/src/lib.rs`, `crates/views/src/shared/cells.rs`
-and `crates/views/src/chrome/` first. Extend what's there — add a builder method to `Button` rather
+and `crates/views/src/chrome/` first. Extend what's there - add a builder method to `Button` rather
 than writing an `IconButton`.
 
 **Never hardcode a color, radius, or size.** Everything comes from the theme, and metrics scale with
@@ -144,22 +138,22 @@ t!("artist-follow")
 t!("song-disc-track", disc = disc, track = number)
 ```
 
-Developer-facing text — `.context("cannot …")`, `log::warn!`, wire values — stays in English.
+Developer-facing text - `.context("cannot ...")`, `log::warn!`, wire values - stays in English.
 
 **Register new assets.** SVGs go in `assets/icons/` and their stem goes in the `ICONS` list in
-`crates/sonora/src/assets.rs`, otherwise loading logs `assets: … is not registered` and renders
+`crates/sonora/src/assets.rs`, otherwise loading logs `assets: ... is not registered` and renders
 nothing.
 
 **One breakpoint ladder.** Use `ui::Room` (`Tight | Snug | Roomy | Wide | Vast`), and measure against
 `Chrome::content`, not the raw viewport width:
 
 ```rust
-if Chrome::room(window, cx).fits(Room::Roomy) { … }
+if Chrome::room(window, cx).fits(Room::Roomy) { ... }
 ```
 
-**Network work runs on the tokio runtime, never on GPUI's executor.** Anything touching `MusicApi`,
-librespot or sockets goes inside `io.spawn`, mutations happen in `this.update`, and the returned
-`Task` is stored in a field — dropping it is how sign-out and navigation cancel in-flight loads.
+**Network work runs on the tokio runtime, never on GPUI's executor.** Anything touching `MusicApi`
+or sockets goes inside `io.spawn`, mutations happen in `this.update`, and the returned
+`Task` is stored in a field - dropping it is how sign-out and navigation cancel in-flight loads.
 Never `.detach()` a data load. New network-backed features belong in a `state` entity, not a view.
 
 **Comments: essentially none.** Name things so they don't need one. If a comment is unavoidable it should stay concise, no trailing period.
@@ -167,7 +161,7 @@ Never `.detach()` a data load. New network-backed features belong in a `state` e
 ## Translations
 
 English is the source of truth and must carry every key. Other locales may lag: a missing key falls
-back to English at runtime, so a partial translation is a fine contribution — don't machine-translate
+back to English at runtime, so a partial translation is a fine contribution - don't machine-translate
 a language you don't speak just to fill the table. The tests only check that English is complete and
 that no locale invents a key.
 
@@ -189,9 +183,9 @@ strings.
 
 Don't hand-edit these, re-run the generator:
 
-- `THIRD-PARTY.md` — `scripts/generate-notices.py` (a new dependency means re-running it)
-- the translation table in `README.md` — `scripts/i18n-coverage.py`
-- `assets/linux/`, `assets/macos/sonora.icns`, `assets/windows/sonora.ico` —
+- `THIRD-PARTY.md` - `scripts/generate-notices.py` (a new dependency means re-running it)
+- the translation table in `README.md` - `scripts/i18n-coverage.py`
+- `assets/linux/`, `assets/macos/sonora.icns`, `assets/windows/sonora.ico` -
   `scripts/generate-icons.py` from the master `assets/icon.svg`
 - `cargoHash` in `flake.nix` goes stale when `Cargo.lock` changes: build once, take the `got:` hash
   from the failure, paste it in
@@ -199,7 +193,7 @@ Don't hand-edit these, re-run the generator:
 ## Changelog
 
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Add user-facing
-sentences to `## [Unreleased]` as features land, under `Added` / `Changed` / `Fixed` — say what
+sentences to `## [Unreleased]` as features land, under `Added` / `Changed` / `Fixed` - say what
 someone using Sonora can now do, and leave out work no user can observe. Cutting a release is then
 only a rename.
 
