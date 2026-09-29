@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.2] - 2026-09-29
+
+### Added
+
+- Releases now ship `.flatpak` bundles for x86_64 and aarch64 alongside the other assets.
+
+### Fixed
+
+- SLSA provenance now attaches to the draft release instead of opening a competing empty
+  release on the same tag.
+
 ## [0.42.1] - 2026-09-29
 
 ### Added

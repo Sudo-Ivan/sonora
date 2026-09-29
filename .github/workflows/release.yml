@@ -735,10 +735,16 @@ jobs:
       actions: read # read the workflow path for the provenance
       id-token: write # sign the provenance through Sigstore
       contents: write # attach the bundle to the draft release
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
+    # The generator must be referenced by its release tag: it resolves the builder binary
+    # from its own GitHub release by tag name, so a commit SHA breaks it. That makes the
+    # tag pin deliberate rather than an unpinned-uses violation.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0 # zizmor: ignore[unpinned-uses] the builder release is resolved by tag
     with:
       base64-subjects: ${{ needs.draft.outputs.hashes }}
       upload-assets: true
+      # The release is a draft at this point; without this the generator opens a second,
+      # published release on the same tag and races this workflow's own publish step.
+      draft-release: true
       provenance-name: sonora-${{ github.ref_name }}.intoto.jsonl
 
   publish:
