@@ -17,11 +17,28 @@ const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "opus", "wav", "wv", "ape", "webm", "mka",
 ];
 
+/// The playlist file extensions the walk picks up beside the music.
+const PLAYLIST_EXTENSIONS: &[&str] = &["m3u", "m3u8"];
+/// The most lines one playlist file may carry.
+const PLAYLIST_LINES: usize = 50_000;
+/// A playlist file bigger than this is not a playlist so much as a dump.
+const PLAYLIST_BYTES: u64 = 8 * 1024 * 1024;
+
 #[derive(Default)]
 pub struct Scanned {
     pub tracks: Vec<Track>,
     pub albums: Vec<Album>,
     pub portraits: HashMap<String, String>,
+    /// The playlist files found beside the music, already resolved to scanned tracks.
+    pub playlists: Vec<Imported>,
+}
+
+/// One playlist file the scan read and matched against the library.
+pub struct Imported {
+    /// The file stem, which is the playlist's name on import.
+    pub name: String,
+    /// The local track ids its entries resolved to, in file order.
+    pub tracks: Vec<String>,
 }
 
 /// One file the walk turned up. A file in a folder whose time has not moved is taken on trust:
@@ -78,11 +95,19 @@ pub fn scan(roots: &[PathBuf], cache_dir: &Path, index: &Index) -> Scanned {
 
     let mut files = Vec::new();
     let mut folders = Vec::new();
+    let mut playlist_files = Vec::new();
     let mut reached = Vec::new();
     for root in roots {
         if root.is_dir() {
             reached.push(root.clone());
-            walk(root, &remembered, &mut files, &mut folders, &progress);
+            walk(
+                root,
+                &remembered,
+                &mut files,
+                &mut folders,
+                &mut playlist_files,
+                &progress,
+            );
         }
     }
     let found = files.len();
@@ -112,6 +137,7 @@ pub fn scan(roots: &[PathBuf], cache_dir: &Path, index: &Index) -> Scanned {
     scanned.albums = group_albums(&parsed);
     scanned.tracks = parsed.into_iter().map(|tagged| tagged.track).collect();
     index.save(&changes);
+    scanned.playlists = read_playlists(&playlist_files, &scanned.tracks);
 
     log::debug!(
         "local: scanned {found} files and {} folders in {}ms \
@@ -355,6 +381,7 @@ fn walk(
     remembered: &Remembered,
     files: &mut Vec<Found>,
     folders: &mut Vec<Folder>,
+    playlists: &mut Vec<PathBuf>,
     progress: &progress::Scan,
 ) {
     let Some((mtime, _)) = stat(dir) else {
@@ -398,7 +425,7 @@ fn walk(
                 if !progress.live() {
                     return;
                 }
-                walk(child, remembered, files, folders, progress);
+                walk(child, remembered, files, folders, playlists, progress);
             }
         }
         false => {
@@ -419,7 +446,9 @@ fn walk(
                     return;
                 }
                 if folder {
-                    walk(&path, remembered, files, folders, progress);
+                    walk(&path, remembered, files, folders, playlists, progress);
+                } else if is_playlist_file(&path) {
+                    playlists.push(path.clone());
                 } else if is_audio_file(&path) {
                     let Some((mtime, size)) = stat(&path) else {
                         continue;
@@ -540,6 +569,107 @@ fn is_audio_file(path: &Path) -> bool {
         })
 }
 
+fn is_playlist_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            PLAYLIST_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
+}
+
+/// Reads every playlist file the walk found and resolves its entries against the tracks the
+/// scan produced, so importing never touches the filesystem again.
+fn read_playlists(paths: &[PathBuf], tracks: &[Track]) -> Vec<Imported> {
+    let by_path: HashMap<PathBuf, String> = tracks
+        .iter()
+        .filter_map(|track| {
+            let id = track.id.as_ref()?;
+            let path = wire::path_from_track_id(id)?;
+            Some((path.to_path_buf(), id.clone()))
+        })
+        .collect();
+    paths
+        .iter()
+        .filter_map(|path| read_playlist(path, &by_path))
+        .collect()
+}
+
+/// Reads one playlist file: every line that is not an M3U directive is an entry, resolved
+/// against the folder the file sits in and matched to a scanned track. Entries that point
+/// elsewhere, on the web or outside the library, are dropped quietly, and a file that matches
+/// nothing is skipped entirely so an empty import never clears the user's copy.
+fn read_playlist(path: &Path, by_path: &HashMap<PathBuf, String>) -> Option<Imported> {
+    let small = std::fs::metadata(path)
+        .map(|meta| meta.len() <= PLAYLIST_BYTES)
+        .unwrap_or_default();
+    if !small {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let dir = path.parent()?;
+    let tracks: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .take(PLAYLIST_LINES)
+        .filter_map(|line| resolve(dir, line))
+        .filter_map(|entry| by_path.get(&entry).cloned())
+        .collect();
+    if tracks.is_empty() {
+        return None;
+    }
+    Some(Imported {
+        name: path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| folder_name(dir)),
+        tracks,
+    })
+}
+
+/// Turns one playlist entry into the path it names. Plain entries resolve against the
+/// playlist's folder, file:// uris are unfolded and decoded, and entries on any other scheme
+/// are remote and cannot play. Windows tools write backslashes, which is why they are folded
+/// before the lookup; a real file name containing one would not match either way.
+fn resolve(dir: &Path, entry: &str) -> Option<PathBuf> {
+    let unfolded = match entry.strip_prefix("file://") {
+        Some(rest) => percent_encoding::percent_decode_str(rest)
+            .decode_utf8()
+            .ok()?
+            .into_owned(),
+        None => entry.to_owned(),
+    };
+    if unfolded.contains("://") {
+        return None;
+    }
+    let path = PathBuf::from(unfolded.replace('\\', "/"));
+    let path = match path.is_absolute() {
+        true => path,
+        false => dir.join(path),
+    };
+    normalize(&path)
+}
+
+/// Collapses `.` and `..` lexically, so `../a/b.mp3` lands on the path the walk collected
+/// without touching the filesystem for a canonical answer. None when the entry climbs above
+/// its root.
+fn normalize(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,6 +731,92 @@ mod tests {
     }
 
     #[test]
+    fn a_playlist_file_imports_the_tracks_it_names() {
+        let _scanning = alone();
+        let (dir, index) = scratch("sonora-scan-test-import");
+        touch(&dir.join("one.mp3"));
+        touch(&dir.join("two.flac"));
+        std::fs::write(
+            dir.join("mix.m3u"),
+            "#EXTM3U\n#EXTINF:1,One\none.mp3\ntwo.flac\nmissing.mp3\nhttps://example.com/stream.mp3\n",
+        )
+        .unwrap();
+
+        let scanned = scan(std::slice::from_ref(&dir), &dir, &index);
+
+        assert_eq!(scanned.playlists.len(), 1);
+        let playlist = &scanned.playlists[0];
+        assert_eq!(playlist.name, "mix");
+        assert_eq!(playlist.tracks.len(), 2, "{:?}", playlist.tracks);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_playlist_in_a_nested_folder_resolves_from_that_folder() {
+        let _scanning = alone();
+        let (dir, index) = scratch("sonora-scan-test-nested-import");
+        touch(&dir.join("audio/deep.mp3"));
+        fs::create_dir_all(dir.join("list")).unwrap();
+        std::fs::write(dir.join("list/mix.m3u8"), "../audio/deep.mp3\n").unwrap();
+
+        let scanned = scan(std::slice::from_ref(&dir), &dir, &index);
+
+        assert_eq!(scanned.playlists.len(), 1);
+        assert_eq!(scanned.playlists[0].tracks.len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn playlist_entries_resolve_every_shape() {
+        let dir = Path::new("/music/lists");
+        assert_eq!(
+            resolve(dir, "/music/a/b.mp3"),
+            Some(PathBuf::from("/music/a/b.mp3"))
+        );
+        assert_eq!(
+            resolve(dir, "../a/b.mp3"),
+            Some(PathBuf::from("/music/a/b.mp3"))
+        );
+        assert_eq!(
+            resolve(dir, "..\\a\\b.mp3"),
+            Some(PathBuf::from("/music/a/b.mp3"))
+        );
+        assert_eq!(
+            resolve(dir, "file:///music/a%20b.mp3"),
+            Some(PathBuf::from("/music/a b.mp3"))
+        );
+        assert_eq!(resolve(dir, "https://example.com/x.mp3"), None);
+        // Two levels up still lands somewhere inside the root; three climbs out of it.
+        assert_eq!(
+            resolve(dir, "../../above.mp3"),
+            Some(PathBuf::from("/above.mp3"))
+        );
+        assert_eq!(resolve(dir, "../../../above.mp3"), None);
+    }
+
+    proptest::proptest! {
+        /// Playlist bodies of any shape parse without panicking: directives, junk and empty
+        /// lines are filtered the same way the unit cases define.
+        #[test]
+        fn playlist_parsing_never_panics(
+            entries in proptest::collection::vec("[\\u{20}-\\u{7e}]{0,60}", 0..24),
+            seeds in proptest::collection::vec("[#\\u{20}-\\u{7e}]{0,40}", 0..24),
+        ) {
+            let body = seeds
+                .iter()
+                .chain(entries.iter())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n");
+            let dir = Path::new("/music/lists");
+            for line in body.lines() {
+                let _ = resolve(dir, line);
+            }
+            let _ = normalize(Path::new(&body));
+        }
+    }
+
+    #[test]
     fn walks_nested_folders_for_stray_audio_files() {
         let _scanning = alone();
         let (dir, _) = scratch("sonora-scan-test-stragglers");
@@ -615,6 +831,7 @@ mod tests {
             &Remembered::default(),
             &mut found,
             &mut folders,
+            &mut Vec::new(),
             &crate::progress::start(),
         );
 

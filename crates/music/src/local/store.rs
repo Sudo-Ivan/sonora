@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Result};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use storage::Database;
 
 use crate::LOCAL_PLAYLIST_PREFIX;
@@ -197,6 +197,63 @@ impl Store {
         touch(&connection, id)
     }
 
+    /// Syncs a playlist discovered on disk: the one by this name, or a fresh one, ends up
+    /// holding exactly these tracks in this order. Runs as one transaction so a re-scan of a
+    /// long playlist is a few statements rather than a query a track.
+    pub fn import(&self, name: &str, track_ids: &[String]) -> Result<String> {
+        let mut connection = self.open()?;
+        let existing: Option<String> = connection
+            .query_row(
+                "SELECT id FROM playlists WHERE name = ?",
+                params![name],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("cannot look up a local playlist")?;
+        let transaction = connection
+            .transaction()
+            .context("cannot start a playlist import")?;
+        let id = match existing {
+            Some(id) => {
+                transaction
+                    .execute(
+                        "DELETE FROM playlist_tracks WHERE playlist_id = ?",
+                        params![id],
+                    )
+                    .context("cannot clear an imported playlist")?;
+                id
+            }
+            None => {
+                let id = format!("{LOCAL_PLAYLIST_PREFIX}{}-{}", stamp(), minted());
+                transaction
+                    .execute(
+                        "INSERT INTO playlists (id, name, modified_at) VALUES (?, ?, ?)",
+                        params![id, name, stamp()],
+                    )
+                    .context("cannot create an imported playlist")?;
+                id
+            }
+        };
+        {
+            let mut insert = transaction
+                .prepare(
+                    "INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
+                     VALUES (?, ?, ?)",
+                )
+                .context("cannot prepare playlist rows")?;
+            for (position, track_id) in track_ids.iter().enumerate() {
+                insert
+                    .execute(params![id, track_id, position as i64])
+                    .context("cannot write an imported track")?;
+            }
+        }
+        touch(&transaction, &id)?;
+        transaction
+            .commit()
+            .context("cannot commit a playlist import")?;
+        Ok(id)
+    }
+
     pub fn remove(&self, id: &str, track_id: &str) -> Result<()> {
         let connection = self.open()?;
         connection
@@ -243,4 +300,44 @@ fn stamp() -> i64 {
         .unwrap_or_default()
         .as_millis()
         .min(i64::MAX as u128) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An isolated database per test, since the schema lives behind the real one.
+    fn scratch(name: &str) -> Store {
+        let path = std::env::temp_dir().join(format!("{name}.sqlite"));
+        let _ = std::fs::remove_file(&path);
+        Store::new(storage::Database::at(path))
+    }
+
+    #[test]
+    fn importing_creates_then_replaces_the_playlist() {
+        let store = scratch("sonora-store-test-import");
+        let ids: Vec<String> = (0..3)
+            .map(|index| format!("local:/x/{index}.mp3"))
+            .collect();
+
+        let first = store.import("Long drives", &ids).expect("import runs");
+        assert_eq!(store.tracks(&first).expect("tracks read"), ids);
+
+        let shorter: Vec<String> = vec!["local:/x/9.mp3".to_owned()];
+        let second = store
+            .import("Long drives", &shorter)
+            .expect("reimport runs");
+        assert_eq!(first, second, "same name reuses the playlist");
+        assert_eq!(store.tracks(&second).expect("tracks read"), shorter);
+    }
+
+    #[test]
+    fn importing_an_empty_list_clears_the_playlist() {
+        let store = scratch("sonora-store-test-empty-import");
+        let id = store
+            .import("Emptied", &["local:/x/1.mp3".to_owned()])
+            .expect("import runs");
+        store.import("Emptied", &[]).expect("reimport runs");
+        assert!(store.tracks(&id).expect("tracks read").is_empty());
+    }
 }

@@ -29,9 +29,15 @@ pub struct LocalClient {
 
 impl LocalClient {
     pub fn new(scanned: Scanned, database: Database, cache_dir: PathBuf, index: Index) -> Self {
+        let store = Store::new(database);
+        for imported in &scanned.playlists {
+            if let Err(error) = store.import(&imported.name, &imported.tracks) {
+                log::warn!("local: cannot import playlist {}: {error:#}", imported.name);
+            }
+        }
         Self {
             scanned: RwLock::new(scanned),
-            store: Store::new(database),
+            store,
             cache_dir,
             index,
         }
@@ -684,6 +690,7 @@ mod tests {
         }
 
         let scanned = Scanned {
+            playlists: Vec::new(),
             tracks,
             albums: vec![],
             portraits: HashMap::new(),
