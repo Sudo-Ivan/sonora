@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-29
+
 ### Added
 
 - Subsonic and Maloja servers running self-signed certificates now work: the sign-in and
