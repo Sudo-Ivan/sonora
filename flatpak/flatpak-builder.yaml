@@ -16,12 +16,13 @@ finish-args:
   - --share=network # Internet access
   - --share=ipc
   - --filesystem=xdg-run/pipewire-0:ro # pipewire socket, same as other players
-  # Open With passes an arbitrary path as argv; a plain Exec launch (unlike a portal file-open)
-  # gets no per-file bind mount, so reading it needs read access to the whole host.
+  # Watched library folders and Open With need stable real paths: the XDG file
+  # chooser portal grants picked folders only for the session, so a music library
+  # cannot persist without read access to the host. Read-only, no write access.
   - --filesystem=host:ro
-  # Session bus permissions, same as other media players:
-  - --talk-name=org.gnome.SettingsDaemon.MediaKeys
-  - --talk-name=org.freedesktop.ScreenSaver
+  # The status notifier item registers on its unique bus name under a sandbox, so
+  # only the watcher needs a talk name. Media keys ride MPRIS, and the inhibit lock
+  # goes through the desktop portal, so no Screensaver or SettingsDaemon names.
   - --talk-name=org.kde.StatusNotifierWatcher
 
   # MPRIS media controls
