@@ -1,0 +1,10 @@
+{
+  "_note": "microsecond ceilings for the bench gate; regenerated with scripts/bench-check.py --write",
+  "playlist_resolve_12000": 250000,
+  "playlist_resolve_windows_12000": 200000,
+  "queue_advance_2000": 20000,
+  "queue_ids_12000": 100000,
+  "queue_record_serialize": 100000,
+  "queue_restore": 200000,
+  "queue_scramble_12000": 250000
+}

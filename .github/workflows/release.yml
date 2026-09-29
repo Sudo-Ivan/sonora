@@ -22,6 +22,7 @@ jobs:
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     permissions:
       contents: read # check out the tree
       id-token: write # sign artefacts through Sigstore
@@ -150,6 +151,7 @@ jobs:
     name: macos app bundle
     needs: build
     runs-on: macos-15
+    timeout-minutes: 45
     permissions:
       contents: read # check out the tree
       id-token: write # sign artefacts through Sigstore
@@ -290,6 +292,7 @@ jobs:
             runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.variant.runner }}
+    timeout-minutes: 60
     permissions:
       contents: read # check out the tree
       id-token: write # sign artefacts through Sigstore
@@ -486,6 +489,7 @@ jobs:
             runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.variant.runner }}
+    timeout-minutes: 90
     permissions:
       contents: read # check out the tree
 
@@ -534,6 +538,7 @@ jobs:
     needs: flatpak
     if: vars.FLATPAK_REPO == 'true' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: flatpak-repo
     permissions:
       contents: write # force-push the flatpak-repo branch
@@ -630,6 +635,7 @@ jobs:
     needs: [build, bundle, appimage]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: release
     permissions:
       contents: write # create the release and upload its assets
