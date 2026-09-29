@@ -40,8 +40,27 @@ const OPEN_COALESCE: Duration = Duration::from_millis(250);
 fn main() {
     logging::init();
 
-    let args: Vec<String> = std::env::args()
-        .skip(1)
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    // Informational flags answer before anything threads or windows: the sandbox, the
+    // instance claim and the app itself would otherwise turn a one-word question into a
+    // session. This is also what the release smoke test runs on every built artefact.
+    if raw.iter().any(|arg| arg == "--version" || arg == "-V") {
+        println!("sonora {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if raw.iter().any(|arg| arg == "--help" || arg == "-h") {
+        println!(
+            "sonora {}\n\
+             A desktop music streaming client.\n\n\
+             usage: sonora [FILE ...]\n\
+             \x20 -h, --help       show this text\n\
+             \x20 -V, --version    show the version",
+            env!("CARGO_PKG_VERSION")
+        );
+        return;
+    }
+    let args: Vec<String> = raw
+        .into_iter()
         .filter(|arg| !arg.starts_with('-'))
         .collect();
     // The domain is installed before the instance listener or the tokio runtime start any
