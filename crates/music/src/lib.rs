@@ -364,6 +364,11 @@ pub enum PlaybackEvent {
         id: Option<String>,
         duration: Duration,
     },
+    /// The whole of the current track has arrived, so fetching the next one takes nothing from
+    /// it. Engines that cannot tell never send this.
+    Downloaded {
+        id: Option<String>,
+    },
     Ended {
         id: Option<String>,
     },
@@ -389,6 +394,7 @@ impl PlaybackEvent {
             | Self::Position { id, .. }
             | Self::Seeked { id, .. }
             | Self::Length { id, .. }
+            | Self::Downloaded { id }
             | Self::Ended { id, .. }
             | Self::Unavailable { id, .. }
             | Self::Throttled { id } => id.as_deref(),

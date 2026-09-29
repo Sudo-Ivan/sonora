@@ -169,6 +169,16 @@ impl<B: Body> Stream<B> {
         Ok(stream)
     }
 
+    /// Waits until the download has ended, whether it finished or broke.
+    pub async fn finished(&self) {
+        let mut arrived = self.arrived.clone();
+        while !self.done() {
+            if arrived.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
     /// Waits until `wanted` bytes have arrived, or the download ends. Nothing here blocks a
     /// thread: this is the async side of the same buffer the readers wait on.
     pub async fn wait_for(&mut self, wanted: usize) -> Result<()> {

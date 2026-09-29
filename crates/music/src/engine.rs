@@ -98,6 +98,11 @@ pub trait Fetch: Send + Sync + 'static {
         false
     }
 
+    /// Resolves once the whole track has arrived, or its download has ended some other way.
+    /// The engine reports it so the next track can be fetched without taking bandwidth from
+    /// this one. The default answers at once, which suits a track that is already on disk.
+    async fn downloaded(&self, _loaded: &Self::Loaded) {}
+
     /// Opens a decoder placed at `at`. `None` means the track cannot be played, which the
     /// engine reports as unavailable.
     fn open(&self, id: &str, loaded: &Self::Loaded, at: Duration) -> Option<Self::Source>;
@@ -352,6 +357,9 @@ async fn engine_loop<F: Fetch>(
     // decoder, since the decoder for it does not exist yet.
     let mut hold = Duration::ZERO;
     let (fetched, mut arrivals) = unbounded_channel::<Fetched<F>>();
+    // the wait on the current track's download, so the state hears when all of it is in
+    let mut watching: Option<tokio::task::AbortHandle> = None;
+    let (downloads, mut downloaded) = unbounded_channel::<String>();
 
     loop {
         tokio::select! {
@@ -367,6 +375,7 @@ async fn engine_loop<F: Fetch>(
                             // already decoding, either still or through a gapless join
                             if joined {
                                 current = segued.take();
+                                watch_ahead(&fetch, &current, &ahead, &downloads, &mut watching);
                             }
                             jobs.send(Job::Resume).ok();
                             continue;
@@ -383,6 +392,9 @@ async fn engine_loop<F: Fetch>(
                         // keeps running, and anything that arms the cue before the fetch lands
                         // puts it back on the output.
                         jobs.send(Job::Stop).ok();
+                        if let Some(handle) = watching.take() {
+                            handle.abort();
+                        }
                         current = Some(id.clone());
                         let position = at.unwrap_or_default();
                         hold = position;
@@ -403,6 +415,7 @@ async fn engine_loop<F: Fetch>(
                             // Fetched already, so this starts on the next read.
                             Some(loaded) => {
                                 announce_length(&events, &id, fetch.length(&loaded));
+                                watching = Some(watch(&fetch, &id, &loaded, &downloads));
                                 jobs.send(Job::Play {
                                     id,
                                     loaded,
@@ -419,12 +432,32 @@ async fn engine_loop<F: Fetch>(
                         }
                     }
                     Command::Preload { id, segue } => {
-                        let known = current.as_deref() == Some(id.as_str())
-                            || ahead.as_ref().is_some_and(|(cached, _)| *cached == id);
-                        if known || current.is_none() {
+                        if current.is_none() || current.as_deref() == Some(id.as_str()) {
                             continue;
                         }
-                        spawn(&fetch, id, epoch, segue, &fetched);
+                        let held = ahead
+                            .as_ref()
+                            .filter(|(cached, _)| *cached == id)
+                            .map(|(_, loaded)| loaded.clone());
+                        match held {
+                            // Fetched already, as the next track is once the current one is
+                            // all in. A segue only has to line it up.
+                            Some(loaded) => {
+                                if !segue || segued.as_deref() == Some(id.as_str()) {
+                                    continue;
+                                }
+                                segued = Some(id.clone());
+                                match awaited {
+                                    Some(_) => waiting = Some((id, loaded)),
+                                    None => {
+                                        jobs.send(Job::Queue { id, loaded }).ok();
+                                    }
+                                }
+                            }
+                            None => {
+                                spawn(&fetch, id, epoch, segue, &fetched);
+                            }
+                        }
                     }
                     Command::Play => {
                         wanted = true;
@@ -485,6 +518,7 @@ async fn engine_loop<F: Fetch>(
                     awaited = None;
                     inflight = None;
                     announce_length(&events, &id, fetch.length(&loaded));
+                    watching = Some(watch(&fetch, &id, &loaded, &downloads));
                     jobs.send(Job::Play {
                         id,
                         loaded,
@@ -518,9 +552,17 @@ async fn engine_loop<F: Fetch>(
                 }
             }
             join = joined.recv() => {
-                match join {
-                    Some(join) => settle(&mut current, join),
-                    None => break,
+                let Some(join) = join else { break };
+                let before = current.clone();
+                settle(&mut current, join);
+                if current != before {
+                    watch_ahead(&fetch, &current, &ahead, &downloads, &mut watching);
+                }
+            }
+            done = downloaded.recv() => {
+                let Some(id) = done else { break };
+                if current.as_deref() == Some(id.as_str()) {
+                    events.send(PlaybackEvent::Downloaded { id: Some(id) }).ok();
                 }
             }
             lost = gone.recv() => {
@@ -568,6 +610,48 @@ fn announce_length(events: &UnboundedSender<PlaybackEvent>, id: &str, duration: 
                 duration,
             })
             .ok();
+    }
+}
+
+/// Waits on the download of `id` and reports it on `downloads` once all of it is in. The handle
+/// is aborted when the track stops being current, so a skipped track is not held open.
+fn watch<F: Fetch>(
+    fetch: &Arc<F>,
+    id: &str,
+    loaded: &F::Loaded,
+    downloads: &UnboundedSender<String>,
+) -> tokio::task::AbortHandle {
+    let (fetch, id, loaded, downloads) = (
+        fetch.clone(),
+        id.to_owned(),
+        loaded.clone(),
+        downloads.clone(),
+    );
+    tokio::spawn(async move {
+        fetch.downloaded(&loaded).await;
+        downloads.send(id).ok();
+    })
+    .abort_handle()
+}
+
+/// Moves the download watch onto `current` after a gapless join, when its fetch is still held
+/// in `ahead`. A track that is not there goes unwatched, and the state falls back to
+/// preloading near the end.
+fn watch_ahead<F: Fetch>(
+    fetch: &Arc<F>,
+    current: &Option<String>,
+    ahead: &Option<(String, F::Loaded)>,
+    downloads: &UnboundedSender<String>,
+    watching: &mut Option<tokio::task::AbortHandle>,
+) {
+    if let Some(handle) = watching.take() {
+        handle.abort();
+    }
+    let Some(id) = current.as_deref() else {
+        return;
+    };
+    if let Some((_, loaded)) = ahead.as_ref().filter(|(cached, _)| cached == id) {
+        *watching = Some(watch(fetch, id, loaded, downloads));
     }
 }
 
