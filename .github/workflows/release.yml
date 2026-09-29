@@ -568,7 +568,7 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: flatpak-*
+          pattern: "*flatpak*"
           path: bundles
           merge-multiple: true
 
@@ -675,6 +675,15 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      # flatpak-builder names its artefacts after the bundle file, not the job, so they
+      # come down under a separate pattern. The intoto bundle must stay out of dist or it
+      # would hash itself into the SLSA subjects.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: "*flatpak*"
           path: dist
           merge-multiple: true
 

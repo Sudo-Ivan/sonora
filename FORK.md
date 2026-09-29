@@ -11,10 +11,11 @@ not listed below is inherited from upstream.
 - The Flatpak application id is `io.github.sudo_ivan.sonora`; the metainfo file is
   `flatpak/io.github.sudo_ivan.sonora.metainfo.xml`. The macOS bundle identifier
   matches it.
-- The Flatpak repository is published to `sudo-ivan.github.io/sonora`. The
-  `GPGKey` lines in `flatpak/pages/sonora.flatpakref` and
-  `flatpak/pages/sonora.flatpakrepo` are intentionally empty: they need this
-  fork's own signing key, as does the `FLATPAK_GPG_KEY` secret below.
+- The Flatpak repository is published to `sudo-ivan.github.io/sonora`, served
+  by GitHub Pages from the `flatpak-repo` branch. `GPGKey` in
+  `flatpak/pages/sonora.flatpakref` and `flatpak/pages/sonora.flatpakrepo`
+  carries the fork's signing key, whose private half lives in the
+  `FLATPAK_GPG_KEY` secret.
 - Upstream's Discord and Matrix links are gone, as is the team roster in
   Settings.
 

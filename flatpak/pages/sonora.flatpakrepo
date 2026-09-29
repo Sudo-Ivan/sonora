@@ -3,4 +3,5 @@ Title=Sonora
 Url=https://sudo-ivan.github.io/sonora/repo
 Homepage=https://github.com/Sudo-Ivan/sonora
 Comment=A native music streaming client, built with Rust and GPUI
-Description=Stream YouTube Music, Deezer, self-hosted servers and local files in one native app
+Description=Stream Subsonic-compatible servers, Deezer and local files in one native app
+GPGKey=mDMEarxFZBYJKwYBBAHaRw8BAQdAFobUITaX2txsIGo9KUBu2+pPx9nJxMxxGqkvQs/mzSa0N1Nvbm9yYSBGbGF0cGFrIFJlcG9zaXRvcnkgPG5vcmVwbHlAc3Vkby1pdmFuLmdpdGh1Yi5pbz6IkAQTFgoAOBYhBKBmxDoGDZvIP6VY3uokIX5uczgJBQJqvEVkAhsDBQsJCAcCBhUKCQgLAgQWAgMBAh4BAheAAAoJEOokIX5uczgJVMsBAJPghu+RZRKRwM4GjI226tAP7bJxIU5C2zCfOpeAGSTPAQCRd5WNp+m34MAbeIOltj3ePx4xsyfk86+Pb9db3vkGCA==
