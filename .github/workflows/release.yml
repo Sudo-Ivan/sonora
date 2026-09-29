@@ -1,7 +1,11 @@
 name: release
 
 on:
+  # Branch pushes are deliberately included: a tag-only trigger still reports a run on them,
+  # which then lands as a zero-job failure. The jobs below gate themselves on tag refs, and
+  # the placeholder job covers the rest.
   push:
+    branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -19,11 +23,11 @@ env:
 
 # No caches in this workflow on purpose: a poisoned cache on a tag build would ship to users.
 jobs:
-  # GitHub still reports a run for a tag-filtered workflow on branch pushes; without a job to
-  # run it lands as a zero-job failure. This no-op turns those phantom runs green.
+  # Covers every push that is not a tag, so a branch push ends green instead of as a run
+  # with nothing to do.
   skipped:
     name: not a tag push
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ github.ref_type != 'tag' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -33,6 +37,7 @@ jobs:
 
   build:
     name: ${{ matrix.target }}
+    if: ${{ github.ref_type == 'tag' || github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     permissions:
