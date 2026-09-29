@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.1] - 2026-09-29
+
 ### Added
 
 - Release assets now carry SLSA provenance: an `sonora-<tag>.intoto.jsonl` bundle is attached
