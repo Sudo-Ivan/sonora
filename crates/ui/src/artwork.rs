@@ -111,9 +111,17 @@ impl Asset for ArtworkBytesLoader {
     }
 }
 
+/// A decoded cover with the palette sampled from it. The loader samples it on its own
+/// thread, so a cover landing mid-scroll costs the frame nothing beyond storing it.
+#[derive(Clone)]
+struct Decoded {
+    image: Arc<RenderImage>,
+    palette: CoverPalette,
+}
+
 impl Asset for ArtworkAssetLoader {
     type Source = ArtworkSource;
-    type Output = Result<Arc<RenderImage>, ImageCacheError>;
+    type Output = Result<Decoded, ImageCacheError>;
 
     fn load(
         source: Self::Source,
@@ -125,17 +133,17 @@ impl Asset for ArtworkAssetLoader {
         async move {
             let bytes = bytes.await?;
 
-            let Ok(format) = image::guess_format(&bytes) else {
-                return svg_renderer
-                    .render_single_frame(&bytes, 1.0)
-                    .map_err(Into::into);
+            let image = match image::guess_format(&bytes) {
+                Ok(format) => Arc::new(RenderImage::new(raster_frames(
+                    &bytes,
+                    format,
+                    source.edge,
+                )?)),
+                Err(_) => svg_renderer.render_single_frame(&bytes, 1.0)?,
             };
+            let palette = of_image(&image);
 
-            Ok(Arc::new(RenderImage::new(raster_frames(
-                &bytes,
-                format,
-                source.edge,
-            )?)))
+            Ok(Decoded { image, palette })
         }
     }
 }
@@ -274,17 +282,17 @@ impl ArtworkCache {
     fn insert(
         &mut self,
         resource: ArtworkKey,
-        value: Result<Arc<RenderImage>, ImageCacheError>,
+        decoded: Result<Decoded, ImageCacheError>,
         cx: &mut App,
     ) {
-        let bytes = value.as_ref().map_or(0, |image| image_bytes(image));
-        if let Ok(image) = &value
+        if let Ok(decoded) = &decoded
             && !self.tints.contains_key(&resource.0)
         {
-            let palette = of_image(image);
             self.trim_tints();
-            self.tints.insert(resource.0.clone(), palette);
+            self.tints.insert(resource.0.clone(), decoded.palette);
         }
+        let value = decoded.map(|decoded| decoded.image);
+        let bytes = value.as_ref().map_or(0, |image| image_bytes(image));
         self.bytes = self.bytes.saturating_add(bytes);
         self.items.insert(
             resource,
@@ -596,9 +604,10 @@ impl ArtworkCache {
             return None;
         };
 
+        let image = value.clone().map(|decoded| decoded.image);
         self.pending.remove(&key);
-        self.insert(key, value.clone(), cx);
-        Some(value)
+        self.insert(key, value, cx);
+        Some(image)
     }
 }
 

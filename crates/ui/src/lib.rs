@@ -16,6 +16,7 @@ mod inline_links;
 mod input;
 mod label;
 mod layout;
+mod lazy;
 mod menu;
 mod metrics;
 mod modal;
@@ -74,6 +75,7 @@ pub use input::{
 };
 pub use label::{eyebrow, faint, heading, upper, vacant};
 pub use layout::{ALWAYS, MIN_CONTENT, ROOMY, Room, SNUG, VAST, WIDE};
+pub use lazy::Lazy;
 pub use menu::{MENU_CONTEXT, Menu, MenuItem, MenuSearch, SubmenuState};
 pub use metrics::{LEADING, Metrics, Rounding, Text, snapped, tucked};
 pub use modal::Modal;
