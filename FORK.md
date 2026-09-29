@@ -30,10 +30,6 @@ not listed below is inherited from upstream.
   existed only to feed it.
 - The one-time anonymous installation report is removed; the app sends no
   telemetry.
-- On Linux the process sandboxes itself with Landlock before any thread starts:
-  it can write only its own config, data, cache and state directories plus the
-  configured music folders, and reads only the system directories it needs.
-  Skipped under Flatpak, `SONORA_SANDBOX=0` disables it.
 - Client-side mixes: "Start mix" on a track builds a run from the library with a
   local scorer (shared artists, album, genre tags, era, duration, popularity)
   with artist and album spacing. No service is asked for recommendations.
@@ -44,6 +40,17 @@ not listed below is inherited from upstream.
 - Subsonic gained OpenSubsonic detail mapping (genres into tags, release dates,
   playlist change dates, starred timestamps) and uses the sonicSimilarity
   extension for radio when the server offers it.
+- Local libraries import .m3u and .m3u8 playlist files found during the folder
+  scan. Entries resolve against the playlist's folder, as absolute paths, as
+  file:// uris, or with Windows separators, and land as ordinary local
+  playlists, rebuilt on each scan that sees the file again.
+- Middle-click paste into text fields uses the X/Wayland primary selection.
+- Fullscreen no longer paints a sibling's cached cover over a track with no
+  art, and hand-queued tracks no longer double in the queue when shuffle is
+  toggled after a restart.
+- The queue keeps its tracks shared rather than duplicated between the source
+  and the play order, and the memory watcher squeezes the artwork cache early
+  when resident memory runs high.
 - Self-hosted Subsonic and Maloja servers can be reached over HTTPS with a
   self-signed or otherwise invalid certificate. The sign-in and scrobble dialogs
   offer "Trust a self-signed or otherwise invalid certificate". The choice is

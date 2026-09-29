@@ -22,6 +22,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recently, so the music never runs out.
 - Subsonic playlists now show when they last changed and who owns them, albums carry release
   dates, and radio uses the server's sonicSimilarity extension when it offers one.
+- Local libraries import .m3u and .m3u8 playlists found beside scanned folders, resolving
+  relative and absolute paths, file:// entries and Windows separators against the scanned
+  tracks.
+
+### Fixed
+
+- Middle-click paste now works in text fields on Linux, using the primary selection the way
+  native fields do.
+- Fullscreen no longer shows the previous track's cached cover when the playing track has no
+  art of its own.
+- Toggling shuffle after a restart no longer lists hand-queued tracks twice, and a source
+  that lists one song more than once keeps the right copy when shuffling.
 
 ### Removed
 
