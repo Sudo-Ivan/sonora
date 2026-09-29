@@ -762,4 +762,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
-        run: gh release edit "$TAG" --draft=false
+        # No checkout in this job, so gh needs the repo spelled out.
+        run: gh release edit "$TAG" --draft=false -R "$GITHUB_REPOSITORY"
