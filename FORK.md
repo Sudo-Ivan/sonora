@@ -84,6 +84,11 @@ not listed below is inherited from upstream.
   `gh release`: the release is created as a draft with all assets on it, then
   published once. Enable "immutable releases" and tag protection in the
   repository settings so a published release and its tag cannot be mutated.
+- SLSA provenance comes from the pinned `slsa-github-generator` generic builder,
+  a reusable workflow that signs in isolation from the build jobs (SLSA level 3
+  style isolation) and attaches `sonora-<tag>.intoto.jsonl` to the draft before
+  it publishes. Users verify with `gh attestation verify` or `slsa-verifier`
+  offline, as documented under "Provenance" in the README.
 - Every third-party action is pinned to a full commit SHA, every job declares
   least-privilege permissions, no caches run on tag builds, and `zizmor` audits
   the workflows on every run. `Quad4-Software/argus` scans the dependency tree

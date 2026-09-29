@@ -650,15 +650,17 @@ jobs:
           git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" \
             push --force "https://github.com/$GITHUB_REPOSITORY" HEAD:flatpak-repo
 
-  release:
-    name: publish the release
+  draft:
+    name: draft the release
     needs: [build, bundle, appimage]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
     permissions:
-      contents: write # create the release and upload its assets
+      contents: write # create the draft release and upload its assets
+    outputs:
+      hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -690,6 +692,11 @@ jobs:
       - name: checksums
         run: cd dist && shasum -a 256 -- * > SHA256SUMS
 
+      # The SLSA generator consumes one sha256sum-style line per released file, base64'd.
+      - name: subjects
+        id: hashes
+        run: echo "hashes=$(cd dist && sha256sum -- * | base64 -w0)" >> "$GITHUB_OUTPUT"
+
       - name: release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -712,7 +719,33 @@ jobs:
           case "$TAG" in *-*) args+=(--prerelease);; esac
           gh release create "$TAG" "${args[@]}" dist/*
 
-      - name: publish the release
+  # Provenance lands on the draft before it publishes: the SLSA generator runs in its own
+  # isolated reusable workflow, which is what keeps a compromised build job from forging it.
+  provenance:
+    name: SLSA provenance
+    needs: [draft]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      actions: read # read the workflow path for the provenance
+      id-token: write # sign the provenance through Sigstore
+      contents: write # attach the bundle to the draft release
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
+    with:
+      base64-subjects: ${{ needs.draft.outputs.hashes }}
+      upload-assets: true
+      provenance-name: sonora-${{ github.ref_name }}.intoto.jsonl
+
+  publish:
+    name: publish the release
+    needs: [draft, provenance]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: write # publish the draft
+    steps:
+      - name: publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}

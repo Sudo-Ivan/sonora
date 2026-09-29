@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Release assets now carry SLSA provenance: an `sonora-<tag>.intoto.jsonl` bundle is attached
+  to each release alongside the existing Sigstore build attestations, verifiable with
+  `slsa-verifier` offline.
+
 ## [0.42.0] - 2026-09-29
 
 ### Added
