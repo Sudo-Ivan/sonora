@@ -646,8 +646,10 @@ jobs:
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -q -m "chore(flatpak): publish $VERSION"
           # The credential rides an http header, never the remote URL, so a remote listing
-          # or error message cannot carry it.
-          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" \
+          # or error message cannot carry it. Git over http needs the basic scheme with the
+          # x-access-token user, the same encoding actions/checkout uses.
+          basic="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="AUTHORIZATION: basic $basic" \
             push --force "https://github.com/$GITHUB_REPOSITORY" HEAD:flatpak-repo
 
   draft:
