@@ -94,6 +94,7 @@ jobs:
       - name: toolchain
         env:
           TARGET: ${{ matrix.target }}
+        shell: bash
         run: |
           rustup show
           rustup target add "$TARGET"
@@ -101,6 +102,7 @@ jobs:
       - name: build
         env:
           TARGET: ${{ matrix.target }}
+        shell: bash
         run: cargo build --release --locked --package sonora --target "$TARGET"
 
       - name: stage the executable
