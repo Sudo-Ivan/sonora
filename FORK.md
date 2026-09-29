@@ -8,8 +8,8 @@ not listed below is inherited from upstream.
 
 - Repository metadata, the update checker and the HTTP user-agent strings point at
   `Sudo-Ivan/sonora`.
-- The Flatpak application id is `io.github.sudo-ivan.sonora`; the metainfo file is
-  `flatpak/io.github.sudo-ivan.sonora.metainfo.xml`. The macOS bundle identifier
+- The Flatpak application id is `io.github.sudo_ivan.sonora`; the metainfo file is
+  `flatpak/io.github.sudo_ivan.sonora.metainfo.xml`. The macOS bundle identifier
   matches it.
 - The Flatpak repository is published to `sudo-ivan.github.io/sonora`. The
   `GPGKey` lines in `flatpak/pages/sonora.flatpakref` and

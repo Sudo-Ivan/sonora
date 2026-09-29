@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.sudo-ivan.sonora</id>
+  <id>io.github.sudo_ivan.sonora</id>
 
   <name>Sonora</name>
   <developer id="io.github.sudo-ivan">
@@ -51,7 +51,7 @@
     <release version="@VERSION@" date="@DATE@" />
   </releases>
 
-  <launchable type="desktop-id">io.github.sudo-ivan.sonora.desktop</launchable>
+  <launchable type="desktop-id">io.github.sudo_ivan.sonora.desktop</launchable>
 
   <screenshots>
     <screenshot type="default">

@@ -9,7 +9,7 @@
 	<key>CFBundleIconFile</key>
 	<string>sonora</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.sudo-ivan.sonora</string>
+	<string>io.github.sudo_ivan.sonora</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
