@@ -22,7 +22,7 @@ use crate::separator::Separator;
 use crate::shield::Shield;
 use crate::table::{SelectNext, SelectPrevious};
 use crate::theme::ActiveTheme as _;
-use crate::tooltip::{Perch, Tooltip};
+use crate::tooltip::{Perch, Tipped as _};
 
 pub const MENU_CONTEXT: &str = "Menu";
 
@@ -806,9 +806,7 @@ impl RenderOnce for Menu {
                         state.near(Near::Item, *hovered, window.window_handle(), cx)
                     })
                 })
-                .when_some(tooltip, |this, key| {
-                    this.tooltip(Tooltip::build(key, Perch::Pointer))
-                })
+                .when_some(tooltip, |this, key| this.tip(key, Perch::Follow))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .when_some(press, |this, press| {
                     let released = press.clone();
