@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.4] - 2026-09-29
+
 ### Added
 
 - Sign-in and scrobble dialogs move keyboard focus between fields with Tab and Shift-Tab,
