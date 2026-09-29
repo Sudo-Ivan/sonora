@@ -19,6 +19,18 @@ env:
 
 # No caches in this workflow on purpose: a poisoned cache on a tag build would ship to users.
 jobs:
+  # GitHub still reports a run for a tag-filtered workflow on branch pushes; without a job to
+  # run it lands as a zero-job failure. This no-op turns those phantom runs green.
+  skipped:
+    name: not a tag push
+    if: "!startsWith(github.ref, 'refs/tags/')"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # placeholder only, does nothing
+    steps:
+      - run: echo "branch pushes do not release; tag pushes run the real jobs"
+
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
