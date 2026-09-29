@@ -627,6 +627,26 @@ fn query_for(track: &Track, key: Option<TrackKey>) -> LyricsQuery {
     }
 }
 
+/// The providers that failed their last lookup, so a service that is down warns once and the
+/// repeats stay at info until it recovers.
+fn failing(name: &'static str, failed: bool) -> bool {
+    static FAILED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+        std::sync::OnceLock::new();
+    let Ok(mut failing) = FAILED
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+        .lock()
+    else {
+        return true;
+    };
+    match failed {
+        true => failing.insert(name),
+        false => {
+            failing.remove(name);
+            false
+        }
+    }
+}
+
 async fn gather(
     providers: Vec<Arc<dyn LyricsProvider>>,
     query: LyricsQuery,
@@ -639,8 +659,17 @@ async fn gather(
             provider
                 .search(&query)
                 .await
-                .inspect_err(|error| {
-                    log::warn!("lyrics: {} did not answer: {error:#}", provider.name())
+                .inspect(|_| {
+                    failing(provider.name(), false);
+                })
+                .inspect_err(|error| match failing(provider.name(), true) {
+                    true => log::warn!("lyrics: {} did not answer: {error:#}", provider.name()),
+                    false => {
+                        log::info!(
+                            "lyrics: {} did not answer again: {error:#}",
+                            provider.name()
+                        )
+                    }
                 })
                 .unwrap_or_default()
         });
