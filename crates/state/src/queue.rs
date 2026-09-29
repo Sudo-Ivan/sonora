@@ -169,7 +169,26 @@ fn sift<T>(
     before != tally(past, current, upcoming, source)
 }
 
-fn scramble(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Option<&Track>) {
+/// The place in source that follows the playing track. The Rc identity pins the exact copy,
+/// which matters when a source lists one track more than once: the id alone would drop the
+/// first copy regardless of which one is playing. A track that is not in the source at all,
+/// like a hand-queued oddity, means the whole list is left to play.
+fn tail(source: &[Rc<Track>], current: Option<&Rc<Track>>) -> usize {
+    let Some(current) = current else {
+        return 0;
+    };
+    source
+        .iter()
+        .position(|track| Rc::ptr_eq(track, current))
+        .or_else(|| {
+            source
+                .iter()
+                .position(|track| track.id.as_deref() == current.id.as_deref())
+        })
+        .map_or(0, |index| index + 1)
+}
+
+fn scramble(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Option<&Rc<Track>>) {
     let known: HashSet<&str> = source
         .iter()
         .filter_map(|track| track.id.as_deref())
@@ -179,25 +198,13 @@ fn scramble(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: O
         .filter(|track| !track.id.as_deref().is_some_and(|id| known.contains(id)))
         .collect();
 
-    let mut playing = current.and_then(|current| current.id.clone());
-    tracks.extend(
-        source
-            .iter()
-            .filter(|track| match playing.as_deref() == track.id.as_deref() {
-                true => {
-                    playing = None;
-                    false
-                }
-                false => true,
-            })
-            .cloned(),
-    );
+    tracks.extend(source[tail(source, current)..].iter().cloned());
 
     fastrand::shuffle(&mut tracks);
     *upcoming = tracks.into();
 }
 
-fn restore(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Option<&Track>) {
+fn restore(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Option<&Rc<Track>>) {
     let known: HashSet<&str> = source
         .iter()
         .filter_map(|track| track.id.as_deref())
@@ -207,19 +214,11 @@ fn restore(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Op
         .filter(|track| !track.id.as_deref().is_some_and(|id| known.contains(id)))
         .collect();
 
-    let at = current
-        .and_then(|current| current.id.as_deref())
-        .and_then(|id| {
-            source
-                .iter()
-                .position(|track| track.id.as_deref() == Some(id))
-        });
-    let tail = match at {
-        Some(at) => &source[at + 1..],
-        None => source,
-    };
-
-    *upcoming = tail.iter().cloned().chain(extra).collect();
+    *upcoming = source[tail(source, current)..]
+        .iter()
+        .cloned()
+        .chain(extra)
+        .collect();
 }
 
 fn move_item<T>(items: &mut VecDeque<T>, from: usize, to: usize) -> bool {
@@ -343,8 +342,8 @@ impl Queue {
         let mut suggested = self.upcoming.split_off(self.queued());
         let mut manual: VecDeque<Rc<Track>> = self.upcoming.drain(..self.manual).collect();
         match on {
-            true => scramble(&mut self.upcoming, &self.source, self.current.as_deref()),
-            false => restore(&mut self.upcoming, &self.source, self.current.as_deref()),
+            true => scramble(&mut self.upcoming, &self.source, self.current.as_ref()),
+            false => restore(&mut self.upcoming, &self.source, self.current.as_ref()),
         }
         manual.append(&mut self.upcoming);
         self.upcoming = manual;
@@ -617,7 +616,7 @@ impl Queue {
         self.similar = 0;
         self.current = past.pop();
         if self.shuffle {
-            scramble(&mut self.upcoming, &self.source, self.current.as_deref());
+            scramble(&mut self.upcoming, &self.source, self.current.as_ref());
             past.clear();
         }
         self.past = past;
@@ -1062,7 +1061,7 @@ mod tests {
 
         let clock = Instant::now();
         let mut shuffled: VecDeque<_> = upcoming.iter().cloned().collect();
-        scramble(&mut shuffled, &source, current.as_deref());
+        scramble(&mut shuffled, &source, current.as_ref());
         println!("scramble of {}: {:?}", shuffled.len(), clock.elapsed());
 
         let clock = Instant::now();
@@ -1075,7 +1074,7 @@ mod tests {
         println!("ids() over {}: {:?}", ids.len(), clock.elapsed());
 
         let clock = Instant::now();
-        restore(&mut shuffled, &source, current.as_deref());
+        restore(&mut shuffled, &source, current.as_ref());
         println!("restore: {:?}", clock.elapsed());
         println!("rss after: {}", rss().unwrap_or_default());
     }
