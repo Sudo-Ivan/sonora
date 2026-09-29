@@ -352,7 +352,7 @@ impl FullscreenView {
         let small = track.as_ref().and_then(|track| track.cover.clone());
         let cover_large = self.cover.read(cx).large();
         let large = cover_large
-            .filter(|url| Some(*url) != small.as_deref())
+            .filter(|url| small.is_some() && Some(*url) != small.as_deref())
             .map(SharedString::from);
 
         if self.large != large {
