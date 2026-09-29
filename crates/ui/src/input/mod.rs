@@ -502,6 +502,19 @@ impl Input {
     ) {
         cx.stop_propagation();
         self.focus(window, cx);
+        // A middle click pastes the X/Wayland primary selection at the click point, the way
+        // every native text field on the platform does.
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        if event.button == MouseButton::Middle {
+            self.context_menu = None;
+            let offset = self.offset_for(event.position);
+            self.move_to(offset, cx);
+            if let Some(pasted) = cx.read_from_primary().and_then(|item| item.text()) {
+                let single_line = pasted.replace('\n', " ");
+                self.replace_text_in_range(None, &single_line, window, cx);
+            }
+            return;
+        }
         if event.button == MouseButton::Right {
             self.context_menu = Some(event.position);
             window.prevent_default();
