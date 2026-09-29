@@ -766,6 +766,35 @@ mod tests {
         fs::remove_dir_all(&dir).ok();
     }
 
+    /// One measured value in the shape the bench gate reads off the test output.
+    fn bench(name: &str, value: f64) {
+        println!("BENCH {{\"name\":\"{name}\",\"value\":{value},\"unit\":\"us\"}}");
+    }
+
+    #[test]
+    #[ignore = "measures timings rather than asserting"]
+    fn playlist_resolve_scales() {
+        use std::time::Instant;
+        let dir = Path::new("/music/lists");
+        let clock = Instant::now();
+        for index in 0..12_000usize {
+            let entry = format!("../music/a{}/b{}.mp3", index % 100, index);
+            let _ = resolve(dir, &entry);
+        }
+        let resolved = clock.elapsed();
+        println!("12000 resolves: {resolved:?}");
+        bench("playlist_resolve_12000", resolved.as_micros() as f64);
+
+        let clock = Instant::now();
+        for index in 0..12_000usize {
+            let entry = format!("\\music\\a{}\\b{}.mp3", index % 100, index);
+            let _ = resolve(dir, &entry);
+        }
+        let windows = clock.elapsed();
+        println!("12000 windows resolves: {windows:?}");
+        bench("playlist_resolve_windows_12000", windows.as_micros() as f64);
+    }
+
     #[test]
     fn playlist_entries_resolve_every_shape() {
         let dir = Path::new("/music/lists");

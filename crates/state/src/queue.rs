@@ -982,6 +982,11 @@ mod tests {
         assert_eq!(upcoming, [4, 5]);
     }
 
+    /// One measured value in the shape the bench gate reads off the test output.
+    fn bench(name: &str, value: f64) {
+        println!("BENCH {{\"name\":\"{name}\",\"value\":{value},\"unit\":\"us\"}}");
+    }
+
     /// A seeded scale check rather than an assertion: builds a 12k-track source the way a
     /// whole-library play leaves the queue, then times the operations every advance and
     /// shuffle runs. Run it as cargo test -p state queue_scales -- --ignored --nocapture.
@@ -1050,6 +1055,7 @@ mod tests {
             }
         }
         println!("2000 advances: {:?}", clock.elapsed());
+        bench("queue_advance_2000", clock.elapsed().as_micros() as f64);
 
         let clock = Instant::now();
         let record = record("deezer", &past, current.as_deref(), upcoming.iter(), 40);
@@ -1059,11 +1065,13 @@ mod tests {
             clock.elapsed(),
             json.len()
         );
+        bench("queue_record_serialize", clock.elapsed().as_micros() as f64);
 
         let clock = Instant::now();
         let mut shuffled: VecDeque<_> = upcoming.iter().cloned().collect();
         scramble(&mut shuffled, &source, current.as_ref());
         println!("scramble of {}: {:?}", shuffled.len(), clock.elapsed());
+        bench("queue_scramble_12000", clock.elapsed().as_micros() as f64);
 
         let clock = Instant::now();
         let ids: std::collections::HashSet<String> = past
@@ -1073,10 +1081,12 @@ mod tests {
             .filter_map(|track| track.id.clone())
             .collect();
         println!("ids() over {}: {:?}", ids.len(), clock.elapsed());
+        bench("queue_ids_12000", clock.elapsed().as_micros() as f64);
 
         let clock = Instant::now();
         restore(&mut shuffled, &source, current.as_ref());
         println!("restore: {:?}", clock.elapsed());
+        bench("queue_restore", clock.elapsed().as_micros() as f64);
         println!("rss after: {}", rss().unwrap_or_default());
     }
 
