@@ -559,9 +559,6 @@ jobs:
     environment: flatpak-repo
     permissions:
       contents: write # force-push the flatpak-repo branch
-    env:
-      # A fixed home under the job's temp dir, so no GITHUB_ENV write is needed.
-      GNUPGHOME: ${{ runner.temp }}/gnupg
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -582,6 +579,9 @@ jobs:
         id: key
         env:
           KEY: ${{ secrets.FLATPAK_GPG_KEY }}
+          # A fixed home under the runner's temp dir, so no GITHUB_ENV write is needed. The
+          # runner context only exists at step level, so this cannot sit on the job.
+          GNUPGHOME: ${{ runner.temp }}/gnupg
         run: |
           set -euo pipefail
           mkdir -p "$GNUPGHOME"
@@ -602,6 +602,7 @@ jobs:
       - name: publish the bundles
         env:
           FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
+          GNUPGHOME: ${{ runner.temp }}/gnupg
         run: |
           set -euo pipefail
           # Git cannot preserve OSTree's empty remote refs directory on the
@@ -685,7 +686,7 @@ jobs:
           tar -czf "dist/sonora-$VERSION-licenses.tar.gz" -C licenses .
 
       - name: checksums
-        run: cd dist && shasum -a 256 * > SHA256SUMS
+        run: cd dist && shasum -a 256 -- * > SHA256SUMS
 
       - name: release notes
         env:

@@ -352,6 +352,25 @@ jobs:
         with:
           advanced-security: false
 
+  # actionlint validates the workflow files themselves where zizmor audits their security:
+  # this is the check that catches a context used where GitHub does not allow it.
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out the tree
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      # go install pins the tool by module version and verifies the checksum database.
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.8
+          "$(go env GOPATH)/bin/actionlint" -oneline .github/workflows/*.yml
+
   # Supply-chain scan: local rules and OSV advisories.
   argus:
     name: argus
@@ -380,7 +399,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [check, platforms, build, bench, zizmor, argus]
+    needs: [check, platforms, build, bench, zizmor, actionlint, argus]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -394,6 +413,7 @@ jobs:
             build=${{ needs.build.result }}
             bench=${{ needs.bench.result }}
             zizmor=${{ needs.zizmor.result }}
+            actionlint=${{ needs.actionlint.result }}
             argus=${{ needs.argus.result }}
         run: |
           echo "$RESULTS"
