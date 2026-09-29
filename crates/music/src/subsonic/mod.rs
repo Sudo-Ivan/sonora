@@ -2,6 +2,8 @@ pub(crate) mod auth;
 mod client;
 mod playback;
 mod wire;
+#[cfg(test)]
+mod wire_tests;
 
 use std::sync::Arc;
 

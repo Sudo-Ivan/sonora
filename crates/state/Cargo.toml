@@ -44,3 +44,8 @@ windows-sys.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation.workspace = true
 objc2-io-kit.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+proptest.workspace = true
+tempfile.workspace = true

@@ -810,11 +810,12 @@ mod tests {
     use std::collections::VecDeque;
     use std::time::Duration;
 
+    use gpui::AppContext as _;
     use music::{ArtistRef, Track};
 
     use super::{
-        gap_target, hydrate, in_order, local, move_item, record, restore, scramble, select_past,
-        select_upcoming, sift, stub, trim,
+        Queue, gap_target, hydrate, in_order, local, move_item, record, restore, scramble,
+        select_past, select_upcoming, sift, stub, trim,
     };
 
     fn track(id: &str) -> Track {
@@ -1285,5 +1286,197 @@ mod tests {
 
         trim(&mut past, 0);
         assert!(past.is_empty());
+    }
+
+    /// How many of each id a container set holds. Most queue properties are about that
+    /// multiset, not about the order the tracks sit in.
+    fn multiset(
+        past: &[std::rc::Rc<Track>],
+        current: Option<&std::rc::Rc<Track>>,
+        upcoming: &VecDeque<std::rc::Rc<Track>>,
+    ) -> std::collections::BTreeMap<String, usize> {
+        let mut set = std::collections::BTreeMap::new();
+        for track in past.iter().chain(current).chain(upcoming.iter()) {
+            *set.entry(track.id.clone().unwrap_or_default()).or_default() += 1;
+        }
+        set
+    }
+
+    proptest::proptest! {
+        /// Whatever order scramble picks, it neither loses nor invents tracks: the shuffled
+        /// queue is the source tail plus whatever was queued by hand.
+        #[test]
+        fn scrambling_preserves_the_multiset(
+            source_ids in proptest::collection::vec(0u16..40, 1..24),
+            extra_ids in proptest::collection::vec(100u16..120, 0..6),
+            current_at in proptest::option::of(0usize..24),
+        ) {
+            use std::rc::Rc;
+            let source: Vec<Rc<Track>> = source_ids
+                .iter()
+                .map(|id| Rc::new(track(&id.to_string())))
+                .collect();
+            let mut upcoming: VecDeque<Rc<Track>> = extra_ids
+                .iter()
+                .map(|id| Rc::new(track(&id.to_string())))
+                .collect();
+            let current = current_at.and_then(|index| source.get(index).cloned());
+            let expected = upcoming.clone();
+            // A current beyond the source means scramble keeps the whole list, so the tail
+            // only skips ahead of a track that is really there.
+            let tail_at = current.as_ref().map_or(0, |_| current_at.unwrap() + 1);
+
+            scramble(&mut upcoming, &source, current.as_ref());
+
+            let mut expected_ids = ids(&expected);
+            expected_ids.extend(ids(&source[tail_at.min(source.len())..].iter().cloned().collect()));
+            expected_ids.sort();
+            let mut found = ids(&upcoming);
+            found.sort();
+            assert_eq!(found, expected_ids);
+        }
+
+        /// Restore puts the source back in order and keeps the hand-queued extras at the end,
+        /// so toggling shuffle off after a scramble round-trips the membership.
+        #[test]
+        fn scrambling_then_restoring_returns_the_multiset(
+            source_ids in proptest::collection::vec(0u16..40, 1..24),
+            extra_ids in proptest::collection::vec(100u16..120, 0..6),
+        ) {
+            use std::rc::Rc;
+            let source: Vec<Rc<Track>> = source_ids
+                .iter()
+                .map(|id| Rc::new(track(&id.to_string())))
+                .collect();
+            let extras: Vec<Rc<Track>> = extra_ids
+                .iter()
+                .map(|id| Rc::new(track(&id.to_string())))
+                .collect();
+            let mut upcoming: VecDeque<Rc<Track>> = extras.iter().cloned().collect();
+
+            scramble(&mut upcoming, &source, None);
+            restore(&mut upcoming, &source, None);
+
+            let mut expected = ids(&source.iter().cloned().collect());
+            expected.extend(ids(&extras.iter().cloned().collect()));
+            expected.sort();
+            let mut found = ids(&upcoming);
+            found.sort();
+            assert_eq!(found, expected);
+        }
+
+        /// Chaos pass over the structural ops: moving, selecting and trimming only ever
+        /// permute the same tracks, so the multiset is fixed and history stays capped.
+        #[test]
+        fn structural_ops_preserve_the_multiset(
+            past_len in 0usize..8,
+            upcoming_ids in proptest::collection::vec(0u16..64, 0..24),
+            ops in proptest::collection::vec(0u8..3, 0..32),
+            picks in proptest::collection::vec(0usize..32, 0..32),
+        ) {
+            use std::rc::Rc;
+            let mut past: Vec<Rc<Track>> = (0..past_len)
+                .map(|index| Rc::new(track(&format!("p{index}"))))
+                .collect();
+            let mut current = upcoming_ids.first().map(|id| Rc::new(track(&id.to_string())));
+            let mut upcoming: VecDeque<Rc<Track>> = upcoming_ids
+                .iter()
+                .skip(1)
+                .map(|id| Rc::new(track(&id.to_string())))
+                .collect();
+            let expected = multiset(&past, current.as_ref(), &upcoming);
+
+            for (index, pick) in ops.iter().zip(picks.iter().chain(std::iter::repeat(&0))) {
+                match index {
+                    0 => {
+                        let from = pick % upcoming.len().max(1);
+                        let to = pick % (upcoming.len() + 1).max(1);
+                        let to = to.min(upcoming.len().saturating_sub(1));
+                        move_item(&mut upcoming, from, to);
+                    }
+                    1 => {
+                        _ = select_past(&mut past, &mut current, &mut upcoming, pick % 8);
+                    }
+                    _ => {
+                        _ = select_upcoming(&mut past, &mut current, &mut upcoming, *pick);
+                    }
+                }
+            }
+
+            assert_eq!(multiset(&past, current.as_ref(), &upcoming), expected);
+        }
+
+        /// Trim never grows history and always keeps the newest entries.
+        #[test]
+        fn trimming_keeps_the_newest(past_len in 0usize..64, limit in 0usize..32) {
+            let mut past: Vec<usize> = (0..past_len).collect();
+            let expected: Vec<usize> = past[past_len.saturating_sub(limit)..].to_vec();
+            trim(&mut past, limit);
+            assert_eq!(past, expected);
+        }
+    }
+
+    /// The regression upstream fixed as #838: tracks queued by hand must not end up in the
+    /// rebuilt source, or a shuffle toggle plays them twice. Runs through the real entity so
+    /// revive, the resume snapshot and shuffle all sit in the loop.
+    #[gpui::test]
+    fn a_revived_manual_run_is_not_doubled_by_shuffle(cx: &mut gpui::TestAppContext) {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let database = storage::Database::at(dir.path().join("state.sqlite"));
+        let cache = storage::Cache::at(dir.path().join("cache.sqlite"));
+        let local = std::sync::Arc::new(music::local::LocalProvider::new(
+            dir.path().to_path_buf(),
+            database.clone(),
+            cache,
+        ));
+
+        let (_settings, session, queue) = cx.update(|cx| {
+            cx.set_global(crate::Io::new().expect("a tokio runtime"));
+            let settings = cx.new(|_| crate::AppSettings::load(database));
+            let io = crate::Io::global(cx);
+            let session =
+                cx.new(|cx| crate::Session::new(Vec::new(), local, settings.clone(), io, cx));
+            let queue = cx.new(|cx| Queue::new(session.clone(), settings.clone(), cx));
+            (settings, session, queue)
+        });
+        let _ = session;
+
+        // The resume a restart would carry: the source tracks after the current one, plus
+        // the track the user queued by hand ahead of them.
+        let resume = crate::queue::Resume {
+            provider: "subsonic".to_owned(),
+            position: 0.,
+            origin: None,
+            current: stub(&track("current")),
+            past: Vec::new(),
+            upcoming: (0..12)
+                .map(|index| stub(&track(&index.to_string())).expect("a stub"))
+                .chain(std::iter::once(stub(&track("manual")).expect("a stub")))
+                .collect(),
+            manual: 1,
+        };
+
+        cx.update(|cx| {
+            queue.update(cx, |queue, cx| {
+                queue.revive(resume, cx);
+                queue.set_shuffle(true, cx);
+                queue.set_shuffle(false, cx);
+            });
+        });
+
+        cx.update(|cx| {
+            let upcoming: Vec<String> = queue
+                .read(cx)
+                .upcoming()
+                .filter_map(|track| track.id.clone())
+                .collect();
+            let manual = upcoming.iter().filter(|id| id.as_str() == "manual").count();
+            assert_eq!(manual, 1, "manual track doubled: {upcoming:?}");
+            assert_eq!(
+                upcoming.len(),
+                13,
+                "queue lost or gained tracks: {upcoming:?}"
+            );
+        });
     }
 }

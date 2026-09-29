@@ -43,3 +43,5 @@ ytmusic.workspace = true
 [dev-dependencies]
 env_logger.workspace = true
 rustls.workspace = true
+proptest.workspace = true
+wiremock.workspace = true

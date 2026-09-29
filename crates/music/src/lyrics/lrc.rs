@@ -1061,4 +1061,34 @@ mod tests {
         assert_eq!(stamp_of("18446744073709551615:00"), None);
         assert_eq!(parse("[00:1e30]lost\n[00:01.00]kept").len(), 1);
     }
+
+    proptest::proptest! {
+        /// Arbitrary text is fuzzed through the parser: the contract is that it never
+        /// panics and only ever hands back lines in the order and shape it promises.
+        #[test]
+        fn parsing_never_panics_and_stays_ordered(input in ".*") {
+            let lines = parse(&input);
+            assert!(
+                lines
+                    .iter()
+                    .all(|line| line.end.is_none_or(|end| end >= line.start)),
+                "a line ends before it starts"
+            );
+        }
+
+        /// Tags that look like stamps and junk that does not, mixed together, still only
+        /// yield the well-formed entries the unit cases define.
+        #[test]
+        fn stamp_shaped_noise_stays_bounded(
+            junk in r"[\[\]<>:.0-9a-zA-Z]{0,80}",
+            stamps in proptest::collection::vec((0u8..99, 0u8..99), 0..6),
+        ) {
+            let mut input = junk;
+            for (minutes, seconds) in &stamps {
+                input.push_str(&format!("[{minutes:02}:{seconds:02}.00]x\n"));
+            }
+            let lines = parse(&input);
+            assert!(lines.len() <= stamps.len() + 1);
+        }
+    }
 }

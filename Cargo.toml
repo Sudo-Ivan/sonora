@@ -154,6 +154,9 @@ unicode-segmentation = "1.12"
 ytmusic = { git = "https://github.com/sonorahq/ytmusic-rs", rev = "d4ec8ad" }
 
 percent-encoding = "2.3"
+proptest = "1.9"
+tempfile = "3"
+wiremock = "0.6"
 opensubsonic = "0.4.0"
 tokio = { version = "1.53", features = [
   "rt-multi-thread",
