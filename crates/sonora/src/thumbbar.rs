@@ -8,7 +8,7 @@
 //!
 //! Two Windows rules shape the module. The buttons cannot be added until the
 //! shell has created the taskbar button, which it announces with the registered
-//! `TaskbarButtonCreated` message, and they can be added only once per window —
+//! `TaskbarButtonCreated` message, and they can be added only once per window -
 //! every later change is an update. Both mean the module has to see the window's
 //! messages, so it subclasses the window rather than owning one.
 
@@ -195,7 +195,7 @@ impl ThumbBar {
 /// The Win32 half: the taskbar list, the buttons and the window subclass.
 ///
 /// The subclass procedure and this struct share one [`Shared`], because both
-/// have to reach the buttons — the procedure to add them when the shell says the
+/// have to reach the buttons - the procedure to add them when the shell says the
 /// taskbar button exists, this struct to update them when playback moves. Both
 /// only ever run on the window's own thread, which is why an `Rc` is enough.
 pub struct Bar {
@@ -312,7 +312,7 @@ impl Shared {
 
     /// Hands the buttons to the shell. The first call has to be an add and every
     /// later one an update, and both fail harmlessly before the taskbar button
-    /// exists — the `TaskbarButtonCreated` message is what makes the add stick.
+    /// exists - the `TaskbarButtonCreated` message is what makes the add stick.
     fn push(&mut self) {
         let outcome = match self.added {
             false => unsafe { self.taskbar.ThumbBarAddButtons(self.hwnd, &self.buttons) },

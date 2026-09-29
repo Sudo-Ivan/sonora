@@ -1,22 +1,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result};
-use music::spotify::{AuthConfig, LibrespotClient, auth};
+use anyhow::Result;
+use music::youtube::YouTubeClient;
 use music::{
-    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, MusicApi, Track, TrackKey, binimum, kugou,
-    lrclib, musixmatch, netease,
+    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, MusicApi, Track, TrackKey, kugou, lrclib,
+    musixmatch, netease,
 };
+use ytmusic::YtMusic;
 
-const SOURCES: [&str; 7] = [
-    "Spotify",
-    "YouTube Music",
-    "Apple Music",
-    "Musixmatch",
-    "LrcLib",
-    "Kugou",
-    "NetEase",
-];
+const SOURCES: [&str; 5] = ["YouTube Music", "Musixmatch", "LrcLib", "Kugou", "NetEase"];
 
 struct Measured {
     source: &'static str,
@@ -39,9 +32,7 @@ struct Row {
 
 fn providers() -> Vec<Arc<dyn LyricsProvider>> {
     vec![
-        Arc::new(music::spotify::SpotifyLyrics::from_env()),
         Arc::new(music::youtube::YouTubeLyrics::new()),
-        Arc::new(binimum::Binimum::new()),
         Arc::new(musixmatch::Musixmatch::new()),
         Arc::new(lrclib::LrcLib::new()),
         Arc::new(kugou::Kugou::new()),
@@ -60,26 +51,23 @@ async fn main() -> Result<()> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(2000);
 
-    let session = auth::restore(&AuthConfig::from_env())
-        .await
-        .context("cannot restore the cached session")?
-        .context("no cached credentials; sign in with sonora first")?;
-    let client = Arc::new(LibrespotClient::new(session));
+    let client = YouTubeClient::new(Arc::new(YtMusic::anonymous()));
     let providers = providers();
 
-    if let Ok(wanted) = std::env::var("FIND") {
-        for track in client.search(&wanted).await?.into_iter().take(sample) {
-            eprintln!("{} — {} ({:?})", track.name, track.artists, track.duration);
+    let query = std::env::var("FIND").unwrap_or_else(|_| "top hits".to_owned());
+    if std::env::var("FIND").is_ok() {
+        for track in client.search(&query).await?.into_iter().take(sample) {
+            eprintln!("{} - {} ({:?})", track.name, track.artists, track.duration);
             inspect(&measure(&track, &providers).await);
         }
         return Ok(());
     }
 
     let started = Instant::now();
-    let mut saved = client.saved_tracks().await?;
+    let mut saved = client.search(&query).await?;
     saved.truncate(limit);
     eprintln!(
-        "liked songs: {} fetched in {:?}",
+        "search hits: {} fetched in {:?}",
         saved.len(),
         started.elapsed()
     );
@@ -103,7 +91,7 @@ async fn main() -> Result<()> {
     for (index, track) in picked.iter().enumerate() {
         let row = measure(track, &providers).await;
         eprintln!(
-            "{:>3}/{} {} — {} → {} in {} ms",
+            "{:>3}/{} {} - {} -> {} in {} ms",
             index + 1,
             picked.len(),
             clip(&row.title, 34),
@@ -130,7 +118,7 @@ async fn measure(track: &Track, providers: &[Arc<dyn LyricsProvider>]) -> Row {
         album: (!track.album.is_empty()).then(|| track.album.clone()),
         duration: track.duration,
         track: Some(TrackKey {
-            provider: "spotify",
+            provider: "youtube",
             id: id.clone(),
         }),
     };
@@ -481,7 +469,7 @@ fn quoted(text: &str) -> String {
 
 fn clip(text: &str, width: usize) -> String {
     match text.chars().count() > width {
-        true => format!("{}…", text.chars().take(width - 1).collect::<String>()),
+        true => format!("{}...", text.chars().take(width - 1).collect::<String>()),
         false => format!("{text:<width$}"),
     }
 }

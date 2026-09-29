@@ -57,8 +57,8 @@ pub(crate) struct Remembered {
     pub starred_artists: Vec<SavedArtist>,
 }
 
-/// The library snapshots, filed under the provider's slug and the part: `apple/songs`,
-/// `apple/starred-albums`, `local/artists`. A provider owns one shelf, so its slug is the whole
+/// The library snapshots, filed under the provider's slug and the part: `deezer/songs`,
+/// `deezer/starred-albums`, `local/artists`. A provider owns one shelf, so its slug is the whole
 /// prefix and dropping it forgets that provider. Every method blocks on sqlite and json, so a
 /// caller runs it off the main thread.
 #[derive(Clone)]

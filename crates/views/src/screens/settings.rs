@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::shared::confirm::{Confirm, Kind};
 use crate::shared::effects;
 use crate::shared::local;
 use crate::shared::popups::{AccountPicker, CookiePrompt, SearchPopup, matches_query};
@@ -16,14 +15,13 @@ use gpui::{
 };
 use gpui::{ScrollHandle, prelude::*, svg};
 use i18n::{Language, t};
-use music::drm::Origin;
 use music::equalizer::{self, Preset};
 use music::scrobble::{Link, Secret};
 use music::{AccountChoice, SignIn, SignInPrompt, WritingSystem};
 use router::{Destination, NavEntry, Screen, SettingsTab, navigate};
 use state::{
-    AppSettings, CdmState, DiscordName, Drm, Failure, FullscreenControlsAutohide, Io, Playback,
-    SYSTEM_FONT, Scan, ScrobbleState, Scrobbling, Session, SessionState, Sleep, Sonora,
+    AppSettings, Failure, FullscreenControlsAutohide, Io, Playback, SYSTEM_FONT, Scan,
+    ScrobbleState, Scrobbling, Session, SessionState, Sleep, Sonora,
 };
 use ui::{ActiveTheme as _, Deck, LEADING, Scrollbar, Scroller, eyebrow, snapped};
 use ui::{
@@ -46,7 +44,7 @@ const HEADER_BLUR: Pixels = px(1.);
 /// no hard edge where sharp content emerges from the haze.
 const HEADER_FADE_TAIL: Pixels = px(48.);
 const LICENSE_URL: &str = "https://www.gnu.org/licenses/gpl-3.0.html";
-const SOURCE_URL: &str = "https://github.com/sonorahq/sonora";
+const SOURCE_URL: &str = "https://github.com/Sudo-Ivan/sonora";
 
 const THEMES: &str = "themes";
 const PACKS: &str = "packs";
@@ -65,8 +63,6 @@ const TYPEFACE_GUESS: usize = 24;
 const TYPEFACE_BATCH: usize = 3;
 const STARTUP: &str = "startup";
 const ENTRIES: &str = "entries";
-const DISCORD_NAME: &str = "discord-name";
-const DISCORD_BUTTONS: &str = "discord-buttons";
 const MOTION: &str = "motion";
 const PACE: &str = "pace";
 const SAVER: &str = "saver";
@@ -164,7 +160,6 @@ enum Slot {
     Gapless,
     Sleep,
     StayAwake,
-    Widevine,
     Equalizer,
     EqualizerPreset,
     EqualizerBands,
@@ -173,13 +168,6 @@ enum Slot {
     Karaoke,
     Romanized,
     LyricsForLocal,
-    ArtworkForLocal,
-    Discord,
-    DiscordName,
-    DiscordShowPaused,
-    DiscordBadge,
-    DiscordAnonymous,
-    DiscordButtons,
     Scrobble(usize),
     Version,
     Updates,
@@ -245,49 +233,23 @@ struct Member {
     login: &'static str,
     avatar: &'static str,
     profile: &'static str,
-    role: Role,
-}
-
-#[derive(Clone, Copy)]
-enum Role {
-    LeadMaintainer,
-    Maintainer,
-    Contributor,
-}
-
-impl Role {
-    fn label(self) -> SharedString {
-        match self {
-            Self::LeadMaintainer => t!("settings-role-lead-maintainer"),
-            Self::Maintainer => t!("settings-role-maintainer"),
-            Self::Contributor => t!("settings-role-contributor"),
-        }
-    }
 }
 
 macro_rules! member {
-    ($login:literal, $role:expr) => {
+    ($login:literal) => {
         Member {
             login: $login,
             avatar: concat!("https://github.com/", $login, ".png"),
             profile: concat!("https://github.com/", $login),
-            role: $role,
         }
     };
 }
 
-const MEMBERS: [Member; 5] = [
-    member!("nolight132", Role::LeadMaintainer),
-    member!("zxsleebu", Role::Maintainer),
-    member!("fx-got", Role::Maintainer),
-    member!("Makakashan", Role::Contributor),
-    member!("imizgun", Role::Contributor),
-];
+const MEMBERS: [Member; 1] = [member!("Sudo-Ivan")];
 
 pub struct SettingsView {
     session: Entity<Session>,
     playback: Entity<Playback>,
-    drm: Entity<Drm>,
     settings: Entity<AppSettings>,
     tab: SettingsTab,
     search: Entity<Input>,
@@ -298,10 +260,6 @@ pub struct SettingsView {
     /// Whether the header has measured itself at least once. Until then the height is a
     /// zero stand-in, and the page stays hidden rather than flashing unpadded for a frame.
     header_measured: bool,
-    /// How wide the rows measured last. The Widevine row wraps its explanation to this width
-    /// and needs it before the deck is built, so the first frame falls back to the widest the
-    /// column can be.
-    column: Option<Pixels>,
     scrollbar: Entity<Scrollbar>,
     opacity: ScrubberState,
     sleep: ScrubberState,
@@ -351,8 +309,6 @@ impl SettingsView {
     ) -> Self {
         let settings = Sonora::global(cx).settings.clone();
         let scrobbling = Sonora::global(cx).scrobbling.clone();
-        let drm = Sonora::global(cx).drm.clone();
-        cx.observe(&drm, |_, _, cx| cx.notify()).detach();
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
         cx.observe(&scrobbling, |_, _, cx| cx.notify()).detach();
         cx.observe(&settings, |_, _, cx| cx.notify()).detach();
@@ -396,14 +352,12 @@ impl SettingsView {
         Self {
             session,
             playback,
-            drm,
             settings,
             tab: SettingsTab::General,
             search,
             query: String::new(),
             header_height: Pixels::ZERO,
             header_measured: false,
-            column: None,
             scrollbar: cx.new(|_| Scrollbar::new(ScrollHandle::new()).watching(me)),
             opacity: ScrubberState::new("opacity"),
             sleep: ScrubberState::new("sleep"),
@@ -462,15 +416,6 @@ impl SettingsView {
         self.scrollbar.update(cx, |bar, cx| {
             bar.set_track_top(height, cx);
         });
-        cx.notify();
-    }
-
-    /// Takes the rows' measured width, which only the Widevine row's height depends on.
-    fn set_column(&mut self, width: Pixels, cx: &mut Context<Self>) {
-        if self.column == Some(width) {
-            return;
-        }
-        self.column = Some(width);
         cx.notify();
     }
 
@@ -608,9 +553,6 @@ impl SettingsView {
                     Slot::Sleep,
                     Slot::StayAwake,
                 ];
-                if self.drm.read(cx).shown(cx) {
-                    slots.push(Slot::Widevine);
-                }
                 slots.extend([Slot::Title("settings-group-equalizer"), Slot::Equalizer]);
                 if self.playback.read(cx).equalizer() {
                     slots.push(Slot::EqualizerPreset);
@@ -628,17 +570,10 @@ impl SettingsView {
                 slots
             }
             SettingsTab::Privacy => {
-                vec![
-                    Slot::Title("settings-group-lyrics"),
-                    Slot::LyricsForLocal,
-                    Slot::Title("settings-group-discord"),
-                    Slot::ArtworkForLocal,
-                ]
+                vec![Slot::Title("settings-group-lyrics"), Slot::LyricsForLocal]
             }
-            SettingsTab::Integrations => self
-                .discord_slots(cx)
+            SettingsTab::Integrations => [Slot::Title("settings-group-scrobbling")]
                 .into_iter()
-                .chain([Slot::Title("settings-group-scrobbling")])
                 .chain(self.scrobble_slots(cx))
                 .collect(),
             SettingsTab::About => vec![
@@ -759,10 +694,6 @@ impl SettingsView {
             Slot::Gapless => (t!("settings-gapless"), t!("settings-gapless-detail")),
             Slot::Sleep => (t!("settings-sleep"), t!("settings-sleep-detail")),
             Slot::StayAwake => (t!("settings-stay-awake"), t!("settings-stay-awake-detail")),
-            Slot::Widevine => {
-                let (detail, _) = widevine_copy(self.drm.read(cx).state());
-                (t!("settings-widevine"), i18n::lookup(detail, None))
-            }
             Slot::Equalizer => (t!("settings-equalizer"), t!("settings-equalizer-detail")),
             Slot::EqualizerPreset => (
                 t!("settings-equalizer-preset"),
@@ -788,31 +719,6 @@ impl SettingsView {
             Slot::LyricsForLocal => (
                 t!("settings-lyrics-for-local-files"),
                 t!("settings-lyrics-for-local-files-detail"),
-            ),
-            Slot::Discord => (t!("settings-discord"), t!("settings-discord-detail")),
-            Slot::DiscordName => (
-                t!("settings-discord-name"),
-                t!("settings-discord-name-detail"),
-            ),
-            Slot::DiscordShowPaused => (
-                t!("settings-discord-show-paused"),
-                t!("settings-discord-show-paused-detail"),
-            ),
-            Slot::DiscordBadge => (
-                t!("settings-discord-badge"),
-                t!("settings-discord-badge-detail"),
-            ),
-            Slot::ArtworkForLocal => (
-                t!("settings-artwork-for-local-files"),
-                t!("settings-artwork-for-local-files-detail"),
-            ),
-            Slot::DiscordAnonymous => (
-                t!("settings-discord-anonymous"),
-                t!("settings-discord-anonymous-detail"),
-            ),
-            Slot::DiscordButtons => (
-                t!("settings-discord-buttons"),
-                t!("settings-discord-buttons-detail"),
             ),
             Slot::Scrobble(index) => {
                 let rows = self.scrobbling.read(cx).rows();
@@ -860,7 +766,6 @@ impl SettingsView {
                     + SECTION_GAP,
                 window,
             ),
-            Slot::Widevine => snapped(self.widevine_height(&theme, window, cx), window),
             _ => snapped(standard_height(&theme), window),
         }
     }
@@ -877,23 +782,6 @@ impl SettingsView {
             total += SECTION_GAP + card_height(theme, false);
         }
         total + ACCOUNTS_SLACK
-    }
-
-    /// The Widevine row: its title and action over every line its explanation wraps to.
-    fn widevine_height(&self, theme: &Theme, window: &Window, cx: &App) -> Pixels {
-        let (detail, _) = widevine_copy(self.drm.read(cx).state());
-        let width = self.column.unwrap_or(WIDTH);
-        let lines = wrapped_lines(
-            i18n::lookup(detail, None),
-            theme.text(Text::Small),
-            width,
-            window,
-        );
-        SECTION_GAP
-            + widevine_head(theme)
-            + ROW_GAP
-            + line(theme, Text::Small) * lines as f32
-            + SECTION_GAP
     }
 
     /// The local folder block: the header over one line per watched folder.
@@ -969,7 +857,6 @@ impl SettingsView {
             Slot::Gapless => self.gapless_row(cx).element,
             Slot::Sleep => self.sleep_row(cx).element,
             Slot::StayAwake => self.stay_awake_row(cx).element,
-            Slot::Widevine => self.widevine_row(cx).element,
             Slot::Equalizer => self.equalizer_row(cx).element,
             Slot::EqualizerPreset => self.equalizer_preset_row(cx).element,
             Slot::EqualizerBands => self.equalizer_bands_row(cx).element,
@@ -978,13 +865,6 @@ impl SettingsView {
             Slot::Karaoke => self.karaoke_lyrics_row(cx).element,
             Slot::Romanized => self.romanized_lyrics_row(cx).element,
             Slot::LyricsForLocal => self.lyrics_for_local_files_row(cx).element,
-            Slot::Discord => self.discord_row(cx).element,
-            Slot::DiscordName => self.discord_name_row(cx).element,
-            Slot::DiscordShowPaused => self.discord_show_paused_row(cx).element,
-            Slot::DiscordBadge => self.discord_badge_row(cx).element,
-            Slot::ArtworkForLocal => self.artwork_for_local_files_row(cx).element,
-            Slot::DiscordAnonymous => self.discord_anonymous_row(cx).element,
-            Slot::DiscordButtons => self.discord_buttons_row(cx).element,
             Slot::Scrobble(index) => match index < self.scrobbling.read(cx).rows().len() {
                 true => self.scrobble_row(index, cx).element,
                 false => div().into_any_element(),
@@ -2439,102 +2319,6 @@ impl SettingsView {
         MenuItem::new("sleep-dial", "").content(dial)
     }
 
-    /// The Widevine module row, which only appears while the current provider is one whose
-    /// tracks need the module and this build has a host for one. Sonora uses a browser's copy
-    /// when one is here and otherwise offers Google's download, so the row says where that
-    /// stands. The download is offered by hand whenever Google's copy is not the one in use,
-    /// because a browser's copy can be one this host cannot open. The explanation wraps below
-    /// the title rather than truncating, to the height `widevine_height` measured.
-    fn widevine_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let state = self.drm.read(cx).state().clone();
-        let (detail, note) = widevine_copy(&state);
-        let offerable = matches!(
-            state,
-            CdmState::Declined | CdmState::Missing | CdmState::Ready(Origin::Installed)
-        );
-        let removable = matches!(state, CdmState::Ready(Origin::Fetched));
-        let title = t!("settings-widevine");
-        let detail = i18n::lookup(detail, None);
-
-        let action = div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_2()
-            .text_color(muted)
-            .text_size(small)
-            .child(i18n::lookup(note, None))
-            .when(offerable, |row| {
-                row.child(
-                    Button::new("fetch-widevine")
-                        .label(t!("settings-widevine-fetch"))
-                        .small()
-                        .outline()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.drm.update(cx, |drm, cx| drm.download(cx));
-                        })),
-                )
-            })
-            .when(removable, |row| {
-                row.child(
-                    Button::new("uninstall-widevine")
-                        .label(t!("settings-widevine-uninstall"))
-                        .small()
-                        .ghost()
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let drm = this.drm.clone();
-                            Confirm::ask(
-                                Kind::Widevine,
-                                move |cx| drm.update(cx, |drm, cx| drm.uninstall(cx)),
-                                cx,
-                            );
-                        })),
-                )
-            });
-
-        let element = div()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .py_3()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_4()
-                    .h(widevine_head(&theme))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .line_height(relative(LEADING))
-                            .child(title.clone()),
-                    )
-                    .child(action),
-            )
-            .child(
-                div()
-                    .overflow_hidden()
-                    .line_height(relative(LEADING))
-                    .text_color(muted)
-                    .text_size(small)
-                    .child(detail.clone()),
-            )
-            .into_any_element();
-
-        Setting {
-            title,
-            detail,
-            element,
-        }
-    }
-
     fn updates_row(&self, cx: &mut Context<Self>) -> Setting {
         let theme = *cx.theme();
         let muted = theme.muted_foreground;
@@ -2655,199 +2439,6 @@ impl SettingsView {
         )
     }
 
-    fn discord_slots(&self, cx: &App) -> Vec<Slot> {
-        let mut slots = vec![Slot::Title("settings-group-discord"), Slot::Discord];
-        if self.settings.read(cx).discord_presence() {
-            slots.push(Slot::DiscordName);
-            slots.push(Slot::DiscordShowPaused);
-            slots.push(Slot::DiscordBadge);
-            slots.push(Slot::DiscordAnonymous);
-            slots.push(Slot::DiscordButtons);
-        }
-        slots
-    }
-
-    fn discord_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let on = self.settings.read(cx).discord_presence();
-
-        self.row(
-            t!("settings-discord"),
-            t!("settings-discord-detail"),
-            muted,
-            small,
-            Switch::new("discord", on)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings
-                        .update(cx, |settings, cx| settings.set_discord_presence(!on, cx));
-                }))
-                .into_any_element(),
-        )
-    }
-
-    fn discord_name_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let chosen = self.settings.read(cx).discord_name();
-
-        let picker = Picker::new(
-            DISCORD_NAME,
-            &self.popovers,
-            i18n::lookup(chosen.key(), None),
-        )
-        .width(Picker::NARROW)
-        .items(DiscordName::ALL.map(|name| {
-            MenuItem::new(name.id(), i18n::lookup(name.key(), None))
-                .selected(name == chosen)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings
-                        .update(cx, |settings, cx| settings.set_discord_name(name, cx));
-                    cx.notify();
-                }))
-        }));
-
-        self.row(
-            t!("settings-discord-name"),
-            t!("settings-discord-name-detail"),
-            muted,
-            small,
-            picker.into_any_element(),
-        )
-    }
-
-    fn discord_show_paused_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let on = self.settings.read(cx).discord_show_paused();
-
-        self.row(
-            t!("settings-discord-show-paused"),
-            t!("settings-discord-show-paused-detail"),
-            muted,
-            small,
-            Switch::new("discord-show-paused", on)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings
-                        .update(cx, |settings, cx| settings.set_discord_show_paused(!on, cx));
-                }))
-                .into_any_element(),
-        )
-    }
-
-    fn discord_badge_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let on = self.settings.read(cx).discord_badge();
-
-        self.row(
-            t!("settings-discord-badge"),
-            t!("settings-discord-badge-detail"),
-            muted,
-            small,
-            Switch::new("discord-badge", on)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings
-                        .update(cx, |settings, cx| settings.set_discord_badge(!on, cx));
-                }))
-                .into_any_element(),
-        )
-    }
-
-    fn artwork_for_local_files_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let on = self.settings.read(cx).artwork_for_local_files();
-
-        self.row(
-            t!("settings-artwork-for-local-files"),
-            t!("settings-artwork-for-local-files-detail"),
-            muted,
-            small,
-            Switch::new("artwork-for-local-files", on)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings.update(cx, |settings, cx| {
-                        settings.set_artwork_for_local_files(!on, cx)
-                    });
-                }))
-                .into_any_element(),
-        )
-    }
-
-    fn discord_anonymous_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let on = self.settings.read(cx).discord_without_details();
-
-        self.row(
-            t!("settings-discord-anonymous"),
-            t!("settings-discord-anonymous-detail"),
-            muted,
-            small,
-            Switch::new("discord-anonymous", on)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings.update(cx, |settings, cx| {
-                        settings.set_discord_without_details(!on, cx)
-                    });
-                }))
-                .into_any_element(),
-        )
-    }
-
-    fn discord_buttons_row(&self, cx: &mut Context<Self>) -> Setting {
-        let theme = *cx.theme();
-        let muted = theme.muted_foreground;
-        let small = theme.text(Text::Small);
-        let settings = self.settings.read(cx);
-        let sonora = settings.discord_sonora_button();
-        let provider = settings.discord_provider_button();
-
-        let picker = Picker::new(
-            DISCORD_BUTTONS,
-            &self.popovers,
-            t!("settings-discord-buttons-pick"),
-        )
-        .width(Picker::NARROW)
-        .sticky()
-        .item(
-            MenuItem::new(
-                "discord-button-provider",
-                t!("settings-discord-name-provider"),
-            )
-            .selected(provider)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.settings.update(cx, |settings, cx| {
-                    settings.set_discord_provider_button(!provider, cx)
-                });
-                cx.notify();
-            })),
-        )
-        .item(
-            MenuItem::new("discord-button-sonora", t!("settings-discord-name-sonora"))
-                .selected(sonora)
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.settings.update(cx, |settings, cx| {
-                        settings.set_discord_sonora_button(!sonora, cx)
-                    });
-                    cx.notify();
-                })),
-        );
-
-        self.row(
-            t!("settings-discord-buttons"),
-            t!("settings-discord-buttons-detail"),
-            muted,
-            small,
-            picker.into_any_element(),
-        )
-    }
-
     fn lyrics_for_local_files_row(&self, cx: &mut Context<Self>) -> Setting {
         let theme = *cx.theme();
         let muted = theme.muted_foreground;
@@ -2874,9 +2465,7 @@ impl SettingsView {
         let settings = self.settings.read(cx);
         let providers = [
             (music::lyrics::LOCAL, "settings-lyrics-provider-local"),
-            ("Spotify", "settings-lyrics-provider-spotify"),
             ("YouTube Music", "settings-lyrics-provider-youtube"),
-            ("Apple Music", "settings-lyrics-provider-apple-music"),
             ("Musixmatch", "settings-lyrics-provider-musixmatch"),
             ("LrcLib", "settings-lyrics-provider-lrclib"),
             ("Kugou", "settings-lyrics-provider-kugou"),
@@ -3494,7 +3083,7 @@ impl SettingsView {
             .children(cards)
             .into_any_element();
 
-        // the provider names are words too, so "spotify" finds the accounts
+        // the provider names are words too, so "deezer" finds the accounts
         Setting {
             title,
             detail: format!("{detail} {names}").into(),
@@ -4033,14 +3622,6 @@ impl SettingsView {
                                         .child(t!("settings-team-github")),
                                 ),
                         )
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_size(theme.text(Text::Small))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(theme.muted_foreground)
-                                .child(member.role.label()),
-                        )
                 })),
         )
     }
@@ -4283,53 +3864,6 @@ fn account_error(error: &Failure, cx: &App) -> impl IntoElement {
         )
 }
 
-/// What the Widevine row says: the detail key for its state, and the note beside it.
-/// Shared by the row and its search entry.
-fn widevine_copy(state: &CdmState) -> (&'static str, &'static str) {
-    match state {
-        CdmState::Looking => ("settings-widevine-detail", "settings-widevine-looking"),
-        CdmState::Ready(Origin::Configured) => {
-            ("settings-widevine-detail", "settings-widevine-configured")
-        }
-        CdmState::Ready(Origin::Installed) => {
-            ("settings-widevine-detail", "settings-widevine-installed")
-        }
-        CdmState::Ready(Origin::Fetched) => {
-            ("settings-widevine-detail", "settings-widevine-fetched")
-        }
-        CdmState::Wanted | CdmState::Offered(_) => {
-            ("settings-widevine-none", "settings-widevine-asking")
-        }
-        CdmState::Offering => ("settings-widevine-none", "settings-widevine-fetching"),
-        CdmState::Installing => ("settings-widevine-none", "settings-widevine-installing"),
-        CdmState::Declined | CdmState::Missing => {
-            ("settings-widevine-none", "settings-widevine-missing")
-        }
-    }
-}
-
-/// How tall the Widevine row's top line stands: the title, or the small button beside it
-/// when that is taller.
-fn widevine_head(theme: &Theme) -> Pixels {
-    line(theme, Text::Body).max(theme.metrics.control_small)
-}
-
-/// How many lines `text` wraps to at `width` in the window's font at `size`. Falls back to
-/// one when the text cannot be shaped.
-fn wrapped_lines(text: SharedString, size: Pixels, width: Pixels, window: &Window) -> usize {
-    let run = window.text_style().to_run(text.len());
-    window
-        .text_system()
-        .shape_text(text, size, &[run], Some(width), None)
-        .map(|lines| {
-            lines
-                .iter()
-                .map(|line| line.wrap_boundaries().len() + 1)
-                .sum()
-        })
-        .unwrap_or(1)
-}
-
 /// Hands a file to the system's default application for it, without waiting on that program.
 fn open_path(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
@@ -4441,7 +3975,6 @@ impl Render for SettingsView {
 
         let general = self.tab == SettingsTab::General && !searching;
         let about = self.tab == SettingsTab::About && !searching;
-        let view = cx.entity().downgrade();
 
         div()
             .relative()
@@ -4476,18 +4009,6 @@ impl Render for SettingsView {
                             .px_6()
                             .pb_6()
                             .pt(self.header_height)
-                            // every child stretches across the column, so the widest is the
-                            // width the rows are laid out at
-                            .on_children_prepainted(move |bounds, _, cx| {
-                                let Some(width) = bounds
-                                    .iter()
-                                    .map(|bounds| bounds.size.width)
-                                    .reduce(Pixels::max)
-                                else {
-                                    return;
-                                };
-                                view.update(cx, |view, cx| view.set_column(width, cx)).ok();
-                            })
                             .when(general, |this| {
                                 this.child(self.profile(cx))
                                     .child(Separator::horizontal().w_full())

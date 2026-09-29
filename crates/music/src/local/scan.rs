@@ -8,7 +8,7 @@ use crate::{Album, ReleaseType, Track};
 use super::index::{Changes, Index, Remembered};
 use super::wire::{self, Tagged};
 
-const SEPARATORS: [char; 8] = ['-', '–', '—', '.', '_', '·', ':', ' '];
+const SEPARATORS: [char; 8] = ['-', '-', '-', '.', '_', '·', ':', ' '];
 
 /// How many threads read tags at once. Past this a spinning disk seeks more than it reads.
 const MAX_READERS: usize = 8;

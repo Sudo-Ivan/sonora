@@ -1,10 +1,8 @@
 mod link;
 mod navigation;
-mod uri;
 
 pub use link::Link;
 pub use navigation::{Navigation, NavigationEvent};
-pub use uri::destination;
 
 use gpui::{App, AppContext as _, Entity, Global, SharedString};
 

@@ -6,7 +6,7 @@ use gpui::{
 };
 use i18n::t;
 use music::{AccountChoice, SignIn, SignInPrompt};
-use state::{Session, SessionState, Sonora, Usage};
+use state::{Session, SessionState, Sonora};
 use ui::ActiveTheme as _;
 use ui::{Button, Checkbox, Input, Modal, TabBar, Text};
 
@@ -37,7 +37,6 @@ struct LoginOption {
 
 pub struct LoginView {
     session: Entity<Session>,
-    usage: Entity<Usage>,
     secret: Entity<Input>,
     server: Entity<Input>,
     username: Entity<Input>,
@@ -50,11 +49,8 @@ pub struct LoginView {
 impl LoginView {
     pub fn new(session: Entity<Session>, cx: &mut Context<Self>) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
-        let usage = Sonora::global(cx).usage.clone();
-        cx.observe(&usage, |_, _, cx| cx.notify()).detach();
         Self {
             session,
-            usage,
             secret: cx.new(|cx| Input::new("login-cookie-hint", cx)),
             server: cx.new(|cx| Input::new("login-server-hint", cx)),
             username: cx.new(|cx| Input::new("login-username-hint", cx)),
@@ -65,24 +61,7 @@ impl LoginView {
         }
     }
 
-    fn acted(&self, cx: &mut Context<Self>) {
-        self.usage.update(cx, |usage, cx| usage.report(cx));
-    }
-
-    fn consent(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let checked = self.usage.read(cx).consented();
-        Checkbox::new("usage-consent", checked)
-            .label(t!("login-usage-consent"))
-            .max_w(COLUMN)
-            .text_color(cx.theme().muted_foreground)
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.usage
-                    .update(cx, |usage, cx| usage.consent(!checked, cx));
-            }))
-    }
-
     fn abandon(&mut self, cx: &mut Context<Self>) {
-        self.acted(cx);
         self.clear_secret(cx);
         self.clear_credentials(cx);
         self.session
@@ -90,7 +69,6 @@ impl LoginView {
     }
 
     fn open_credentials(&mut self, slug: &'static str, cx: &mut Context<Self>) {
-        self.acted(cx);
         self.credentials_for = Some(slug);
         cx.notify();
     }
@@ -108,7 +86,6 @@ impl LoginView {
     }
 
     fn abandon_credentials(&mut self, cx: &mut Context<Self>) {
-        self.acted(cx);
         self.clear_credentials(cx);
         cx.notify();
     }
@@ -136,14 +113,12 @@ impl LoginView {
     }
 
     fn start(&mut self, slug: &'static str, method: SignIn, cx: &mut Context<Self>) {
-        self.acted(cx);
         self.manual_secret = None;
         self.session
             .update(cx, |session, cx| session.sign_in(slug, method, cx));
     }
 
     fn start_manual(&mut self, slug: &'static str, provider: &'static str, cx: &mut Context<Self>) {
-        self.acted(cx);
         self.manual_secret = Some((slug, provider));
         let hint = CookiePrompt::hint(slug);
         self.secret.update(cx, |input, cx| input.set_hint(hint, cx));
@@ -156,7 +131,6 @@ impl LoginView {
         if text.trim().is_empty() {
             return;
         }
-        self.acted(cx);
         self.clear_secret(cx);
         self.session
             .update(cx, |session, cx| session.submit_input(text, cx));
@@ -375,7 +349,6 @@ impl LoginView {
     ) -> impl IntoElement {
         AccountPicker::new(accounts)
             .on_pick(cx.listener(|this, id: &SharedString, _, cx| {
-                this.acted(cx);
                 let id = id.to_string();
                 this.session
                     .update(cx, |session, cx| session.submit_input(id, cx));
@@ -453,7 +426,6 @@ impl Render for LoginView {
                     .ghost()
                     .selected(index == self.tab)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.acted(cx);
                         this.tab = index;
                         cx.notify();
                     }))
@@ -500,8 +472,6 @@ impl Render for LoginView {
         };
 
         let theme = *cx.theme();
-        let asking = self.usage.read(cx).asking();
-        let orphan = asking && guest.is_none();
 
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let radius = crate::chrome::window_radius(Sonora::global(cx).settings.read(cx));
@@ -562,11 +532,9 @@ impl Render for LoginView {
                                 .text_size(theme.text(Text::Small))
                                 .text_color(theme.muted_foreground)
                                 .child(t!("login-guest-detail")),
-                        )
-                        .when(asking, |this| this.child(self.consent(cx))),
+                        ),
                 )
             })
-            .when(orphan, |this| this.child(self.consent(cx)))
             .when_some(manual_secret, |this, (slug, provider)| {
                 this.child(self.secret_prompt(slug, provider, cx).into_any_element())
             })

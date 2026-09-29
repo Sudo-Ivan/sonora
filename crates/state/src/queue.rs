@@ -1047,9 +1047,9 @@ mod tests {
         let upcoming = listing(300);
         let current = track("now");
 
-        let resume = record("spotify", &past, Some(&current), upcoming.iter(), 0);
+        let resume = record("deezer", &past, Some(&current), upcoming.iter(), 0);
 
-        assert_eq!(resume.provider, "spotify");
+        assert_eq!(resume.provider, "deezer");
         assert_eq!(resume.position, 0.);
         assert_eq!(resume.current.map(|stub| stub.id), Some("now".to_owned()));
         assert_eq!(resume.past.len(), 20);

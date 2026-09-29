@@ -33,19 +33,6 @@ const YOUTUBE: Guide = Guide {
     note: "login-cookie-step-note",
 };
 
-const APPLE: Guide = Guide {
-    url: "https://music.apple.com",
-    title: "login-cookie-header-title",
-    hint: "login-cookie-hint",
-    steps: [
-        "login-cookie-named-step-1",
-        "login-cookie-step-2",
-        "login-cookie-apple-step-3",
-        "login-cookie-step-4",
-    ],
-    note: "login-cookie-apple-note",
-};
-
 const DEEZER: Guide = Guide {
     url: "https://www.deezer.com",
     title: "login-cookie-named-title",
@@ -63,7 +50,6 @@ const DEEZER: Guide = Guide {
 /// needs no cookie name, so its wording fits any header paste.
 fn guide(slug: &str) -> &'static Guide {
     match slug {
-        "apple" => &APPLE,
         "deezer" => &DEEZER,
         _ => &YOUTUBE,
     }
@@ -74,7 +60,6 @@ fn guide(slug: &str) -> &'static Guide {
 fn named(slug: &str) -> Option<(&'static str, &'static str)> {
     match slug {
         "deezer" => Some(("www.deezer.com", "arl")),
-        "apple" => Some(("music.apple.com", "media-user-token")),
         _ => None,
     }
 }

@@ -2,21 +2,11 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
-use crate::spotify::SpotifyProvider;
 use crate::youtube::YouTubeProvider;
 use crate::{MusicApi, MusicProvider, ProviderSession};
 
-const NAME: &str = "Sonora live privacy test — safe to delete";
+const NAME: &str = "Sonora live privacy test - safe to delete";
 const VERIFY_ATTEMPTS: usize = 30;
-
-#[tokio::test]
-#[ignore = "creates, changes, and deletes a playlist on the connected Spotify account"]
-async fn spotify_can_make_a_playlist_public_and_private() -> Result<()> {
-    let provider = SpotifyProvider::from_env();
-    let session = connected(&provider).await?;
-
-    exercise_playlist_privacy(session.api.as_ref()).await
-}
 
 #[tokio::test]
 #[ignore = "creates, changes, and deletes a playlist on the connected YouTube Music account"]

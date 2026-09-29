@@ -131,18 +131,13 @@ impl Musixmatch {
                 ("app_id", APP),
                 ("usertoken", token.as_str()),
             ];
-            match query.id_for("spotify") {
-                Some(id) => params.push(("track_spotify_id", id)),
-                None => {
-                    params.push(("q_track", query.title.as_str()));
-                    params.push(("q_artist", query.artist.as_str()));
-                    if let Some(album) = query.album.as_deref().filter(|album| !album.is_empty()) {
-                        params.push(("q_album", album));
-                    }
-                    if !query.duration.is_zero() {
-                        params.push(("q_duration", duration.as_str()));
-                    }
-                }
+            params.push(("q_track", query.title.as_str()));
+            params.push(("q_artist", query.artist.as_str()));
+            if let Some(album) = query.album.as_deref().filter(|album| !album.is_empty()) {
+                params.push(("q_album", album));
+            }
+            if !query.duration.is_zero() {
+                params.push(("q_duration", duration.as_str()));
             }
 
             let answer = self.ask(SUBTITLES, &params).await?;

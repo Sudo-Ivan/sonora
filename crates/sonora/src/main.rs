@@ -48,16 +48,9 @@ fn main() {
         single::Instance::Running => return,
         single::Instance::Failed => exit(1),
     }
-    // Only a lone spotify:/web link overrides the startup screen; one or more file paths from
-    // an "Open With" launch are handled after state exists, once the window loop is running.
-    let opened_start = match args.as_slice() {
-        [single] => router::destination(single),
-        _ => None,
-    };
-
-    // Two rustls backends are compiled in: librespot, oauth2 and ytmusic still ask for ring,
-    // while reqwest 0.13 and opensubsonic ask for aws-lc-rs. rustls refuses to guess between
-    // them, so one is picked here. A second install only means another crate got there first.
+    // Two rustls backends are compiled in: ytmusic still asks for ring, while reqwest 0.13
+    // and opensubsonic ask for aws-lc-rs. rustls refuses to guess between them, so one is
+    // picked here. A second install only means another crate got there first.
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -86,8 +79,6 @@ fn main() {
 
         let database = storage::Database::standard();
         let providers: Vec<Arc<dyn music::MusicProvider>> = vec![
-            Arc::new(music::spotify::SpotifyProvider::from_env()),
-            Arc::new(music::apple::AppleProvider::new()),
             Arc::new(music::youtube::YouTubeProvider::new()),
             Arc::new(music::subsonic::SubsonicProvider::new()),
             Arc::new(music::deezer::DeezerProvider::new()),
@@ -102,9 +93,7 @@ fn main() {
             ));
         let lyrics: Vec<Arc<dyn LyricsProvider>> = vec![
             Arc::new(music::local::LocalLyrics),
-            Arc::new(music::spotify::SpotifyLyrics::from_env()),
             Arc::new(music::youtube::YouTubeLyrics::new()),
-            Arc::new(music::binimum::Binimum::new()),
             Arc::new(music::musixmatch::Musixmatch::new()),
             Arc::new(music::lrclib::LrcLib::new()),
             Arc::new(music::kugou::Kugou::new()),
@@ -113,13 +102,12 @@ fn main() {
         state::init(cx, io, database, providers, local_provider, lyrics);
         #[cfg(target_os = "windows")]
         state::install_rounded_window_hook(set_corner_preference, cx);
-        let opened_a_destination = opened_start.is_some();
-        let start = opened_start.unwrap_or_else(|| {
+        let start = {
             let startup = Sonora::global(cx).settings.read(cx).startup().to_owned();
             Screen::from_id(&startup)
                 .unwrap_or(Screen::Home)
                 .destination()
-        });
+        };
         router::init(start, cx);
         let (look, overrides, language, pack, stillness, pace, remembered) = {
             let settings = Sonora::global(cx).settings.read(cx);
@@ -163,7 +151,7 @@ fn main() {
 
         // A cold "Open With" launch reaches Playback through the same batch a hot hand-off
         // uses, now that state exists to open the files into.
-        if !opened_a_destination && !args.is_empty() {
+        if !args.is_empty() {
             sender.send(args.clone()).ok();
         }
 
@@ -198,24 +186,17 @@ fn main() {
 
 fn follow(items: &[String], cx: &mut App) {
     show_window(cx);
-    let mut destination = None;
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for item in items {
-        match router::destination(item) {
-            Some(found) => destination = Some(found),
-            None => paths.extend(local_path_from_arg(item)),
-        }
-    }
-    if let Some(destination) = destination {
-        router::navigate(destination, cx);
-    }
+    let paths: Vec<PathBuf> = items
+        .iter()
+        .filter_map(|item| local_path_from_arg(item))
+        .collect();
     if !paths.is_empty() {
         let playback = Sonora::global(cx).playback.clone();
         playback.update(cx, |playback, cx| playback.open_paths(paths, cx));
     }
 }
 
-/// A bare filesystem path, or a `file://` URI decoded back into one — the two shapes an "Open
+/// A bare filesystem path, or a `file://` URI decoded back into one - the two shapes an "Open
 /// With" launch or drop hands us across platforms.
 fn local_path_from_arg(arg: &str) -> Option<PathBuf> {
     match arg.strip_prefix("file://") {
@@ -224,7 +205,7 @@ fn local_path_from_arg(arg: &str) -> Option<PathBuf> {
     }
 }
 
-/// A `file://` URI body turned into a filesystem path. Windows `file:///C:/…`
+/// A `file://` URI body turned into a filesystem path. Windows `file:///C:/...`
 /// keeps a slash in front of the drive, which is not a path the OS will open.
 fn file_uri_path(rest: &str) -> String {
     let decoded = percent_decode(rest);
@@ -286,7 +267,6 @@ fn open_window(cx: &mut App) {
     let Sonora {
         session,
         cover: _,
-        drm: _,
         library,
         history: _,
         lyrics: _,
@@ -299,7 +279,6 @@ fn open_window(cx: &mut App) {
         scrobbling: _,
         settings: _,
         updates: _,
-        usage: _,
         wake: _,
     } = Sonora::global(cx);
     let (session, library, playback, queue) = (

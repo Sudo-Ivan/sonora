@@ -2,7 +2,7 @@
 //!
 //! Every AAC encoder writes priming samples before the first real one, and an `elst` box names
 //! the part that should be heard. Trimming to it is what makes one track end where the next
-//! begins, so both providers whose tracks are MP4 read it: YouTube Music and Apple Music.
+//! begins, so every provider whose tracks are MP4 reads it: YouTube Music is one.
 
 use std::time::Duration;
 

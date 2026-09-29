@@ -307,10 +307,6 @@ impl MusicProvider for YouTubeProvider {
         Some("music.youtube.com".to_owned())
     }
 
-    fn public_art(&self) -> bool {
-        true
-    }
-
     fn sign_in_options(&self) -> Vec<SignIn> {
         vec![SignIn::Anonymous, SignIn::Secret]
     }

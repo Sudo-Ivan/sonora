@@ -229,7 +229,7 @@ impl Remote {
 
 impl Remote {
     /// The cover to publish: the album art `Cover` resolves once it arrives, the thumbnail the
-    /// track carries until then. Spotify ships a 64px thumbnail with a track, which is plenty
+    /// track carries until then. A provider ships a small thumbnail with a track, which is plenty
     /// for a list row and blurry in a desktop widget that draws it several times that size.
     fn artwork_url(&self, track: &Track, cx: &App) -> Option<String> {
         track

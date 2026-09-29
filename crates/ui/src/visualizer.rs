@@ -126,7 +126,7 @@ impl Visualizer {
     }
 
     /// Defaults to the theme's primary; a caller that knows what is actually behind the
-    /// visualizer — a cover-derived backdrop, say — passes its own.
+    /// visualizer - a cover-derived backdrop, say - passes its own.
     pub fn tint(mut self, tint: Hsla) -> Self {
         self.tint = Some(tint);
         self

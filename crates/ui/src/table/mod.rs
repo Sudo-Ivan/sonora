@@ -555,8 +555,8 @@ impl Viewport {
         (self.height / row).ceil().max(0.) as usize + OVERSCAN + OVERSCAN_ABOVE
     }
 
-    /// The first row to draw: the one under the top edge of the viewport — the head's
-    /// band counts as in view, since the head is see-through on a glass window — and
+    /// The first row to draw: the one under the top edge of the viewport - the head's
+    /// band counts as in view, since the head is see-through on a glass window - and
     /// `OVERSCAN_ABOVE` more before it.
     fn first(&self, head: Pixels, row: Pixels) -> usize {
         let under_edge = ((self.top - head) / row).floor().max(0.) as usize;
@@ -1257,8 +1257,8 @@ impl<S: TableSource> Render for TableState<S> {
             .h(height)
             // Rows sit below the head rather than behind it: the band the head occupies
             // is masked out of them, so a see-through head hides what it covers as
-            // completely as an opaque one ever did — no ghost of artwork, no glyph the
-            // text system culled while the quad beside it survived — and a row under
+            // completely as an opaque one ever did - no ghost of artwork, no glyph the
+            // text system culled while the quad beside it survived - and a row under
             // there cannot be clicked either, because a content mask clips hitboxes
             // too. The inner block is offset back up by the same amount, so every row
             // keeps the position the virtualiser gave it.

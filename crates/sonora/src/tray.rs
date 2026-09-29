@@ -312,7 +312,7 @@ fn shown(artwork: Option<Art>, cx: &App) -> Shown {
         Some(track) => {
             let full = match track.artists.is_empty() {
                 true => track.name.clone(),
-                false => format!("{} – {}", track.artists, track.name),
+                false => format!("{} - {}", track.artists, track.name),
             };
             clip(&full, CAPTION_LIMIT)
         }
@@ -353,9 +353,9 @@ fn clip(text: &str, limit: usize) -> String {
                 .map(|(i, _)| i)
                 .unwrap_or(text.len());
             let trimmed = text[..offset].trim_end_matches(|c: char| {
-                c.is_whitespace() || c == '-' || c == '–' || c == '—' || c == ',' || c == '('
+                c.is_whitespace() || c == '-' || c == '-' || c == '-' || c == ',' || c == '('
             });
-            format!("{trimmed}…")
+            format!("{trimmed}...")
         }
         None => text.to_string(),
     }

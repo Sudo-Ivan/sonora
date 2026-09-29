@@ -17,7 +17,6 @@ use crate::shared::confirm::Confirm;
 use crate::shared::menus::CardMenu;
 use crate::shared::playlist_editor::PlaylistEditor;
 use crate::shared::tag_editor::TagEditor;
-use crate::shared::widevine::WidevinePrompt;
 use crate::shells::Shell;
 
 #[derive(Clone, Copy)]
@@ -49,7 +48,6 @@ pub(crate) struct Workspace {
     tag_editor: Entity<TagEditor>,
     confirm: Entity<Confirm>,
     card_menu: Entity<CardMenu>,
-    widevine: Entity<WidevinePrompt>,
     toasts: Entity<ToastStack>,
     notice: Entity<UpdateNotice>,
     content: AnyView,
@@ -79,7 +77,6 @@ impl Workspace {
             tag_editor: TagEditor::entity(cx),
             confirm: Confirm::entity(cx),
             card_menu: CardMenu::entity(cx),
-            widevine: cx.new(WidevinePrompt::new),
             toasts: cx.new(ToastStack::new),
             notice: cx.new(UpdateNotice::new),
             content,
@@ -211,7 +208,7 @@ impl Render for Workspace {
         // content view keeps its cache. A see-through window has no such colour. The
         // scrim would be one more translucent layer over the one the root already
         // paints, and the content area would sit visibly darker than the chrome
-        // around it for the length of the transition — a quad can only add coverage,
+        // around it for the length of the transition - a quad can only add coverage,
         // never replace it. There the content carries the fade itself, which is the
         // same curve at the price of leaving the cached layout path while it runs.
         let dissolving = cx.theme().transparent;
@@ -361,7 +358,6 @@ impl Render for Workspace {
             .child(self.playlist_editor.clone())
             .child(self.tag_editor.clone())
             .child(self.confirm.clone())
-            .child(self.widevine.clone())
             .child(self.notice.clone())
     }
 }

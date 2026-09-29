@@ -1,5 +1,5 @@
 //! Read-only check of the Deezer protocol with a real account: sign-in, search, stream
-//! resolution, and the first decrypted bytes read through the same `Stream` playback uses —
+//! resolution, and the first decrypted bytes read through the same `Stream` playback uses -
 //! they must open with a known audio magic (`ID3`, an MP3 frame sync, or `fLaC`).
 //!
 //! Run with `DEEZER_ARL=<cookie> cargo run --example deezer-probe --package music`.
@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
     let found = client.search("daft punk").await?;
     let track = found.first().context("the search came back empty")?;
     let id = track.id.clone().context("the track has no id")?;
-    println!("search: {} — {} ({id})", track.name, track.artists);
+    println!("search: {} - {} ({id})", track.name, track.artists);
 
     let opened = client.open_stream(&id).await?;
     println!(

@@ -453,10 +453,10 @@ mod tests {
 
     #[test]
     fn a_library_row_keeps_only_its_bare_id() {
-        let pin = pin_of(&item("spotify:album:4aB", PinTargetKind::Album)).unwrap();
+        let pin = pin_of(&item("deezer:album:4aB", PinTargetKind::Album)).unwrap();
         assert_eq!(pin.kind, PinKind::Album);
         assert_eq!(pin.id, "4aB");
-        assert!(pin_of(&item("spotify:show:4aB", PinTargetKind::Show)).is_none());
+        assert!(pin_of(&item("deezer:show:4aB", PinTargetKind::Show)).is_none());
         assert!(pin_of(&item("bare", PinTargetKind::Album)).is_none());
     }
 }

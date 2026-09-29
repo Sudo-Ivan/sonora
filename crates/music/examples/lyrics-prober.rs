@@ -2,11 +2,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
-use music::spotify::{AuthConfig, LibrespotClient, auth};
 use music::youtube::YouTubeClient;
 use music::{
-    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, MusicApi, Track, TrackKey, binimum, kugou,
-    lrclib, musixmatch, netease,
+    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, MusicApi, Track, TrackKey, kugou, lrclib,
+    musixmatch, netease,
 };
 use ytmusic::YtMusic;
 
@@ -21,9 +20,7 @@ struct Probe {
 
 fn providers() -> Vec<Arc<dyn LyricsProvider>> {
     vec![
-        Arc::new(music::spotify::SpotifyLyrics::from_env()),
         Arc::new(music::youtube::YouTubeLyrics::new()),
-        Arc::new(binimum::Binimum::new()),
         Arc::new(musixmatch::Musixmatch::new()),
         Arc::new(lrclib::LrcLib::new()),
         Arc::new(kugou::Kugou::new()),
@@ -38,7 +35,7 @@ async fn main() -> Result<()> {
         .ok();
 
     let Some(link) = std::env::args().nth(1) else {
-        bail!("usage: lyrics-prober <spotify or youtube link, or a search query>");
+        bail!("usage: lyrics-prober <youtube link or a search query>");
     };
 
     let (track, provider) = resolve(&link).await?;
@@ -51,7 +48,7 @@ async fn main() -> Result<()> {
     };
 
     println!(
-        "{} — {} [{}] {} ({})",
+        "{} - {} [{}] {} ({})",
         track.name,
         track.artists,
         track.album,
@@ -123,26 +120,12 @@ async fn main() -> Result<()> {
 }
 
 async fn resolve(link: &str) -> Result<(Track, &'static str)> {
-    if let Some(id) = youtube_id(link) {
-        let api = Arc::new(YtMusic::anonymous());
-        let track = YouTubeClient::new(api)
-            .track(&id)
-            .await
-            .context("cannot look the video up as a guest")?;
-        return Ok((track, "youtube"));
-    }
-
-    let session = auth::restore(&AuthConfig::from_env())
-        .await
-        .context("cannot restore the cached session")?
-        .context("no cached credentials; sign in with sonora first")?;
-    let client = Arc::new(LibrespotClient::new(session));
-
-    let track = match spotify_id(link) {
+    let client = YouTubeClient::new(Arc::new(YtMusic::anonymous()));
+    let track = match youtube_id(link) {
         Some(id) => client
             .track(&id)
             .await
-            .context("cannot look the track up")?,
+            .context("cannot look the video up as a guest")?,
         None => client
             .search(link)
             .await
@@ -152,7 +135,7 @@ async fn resolve(link: &str) -> Result<(Track, &'static str)> {
             .context("nothing found for that query")?,
     };
 
-    Ok((track, "spotify"))
+    Ok((track, "youtube"))
 }
 
 async fn probe(query: &LyricsQuery) -> Vec<Probe> {
@@ -183,7 +166,7 @@ async fn probe(query: &LyricsQuery) -> Vec<Probe> {
 fn report(query: &LyricsQuery, found: &Probe) {
     let millis = found.elapsed.as_millis();
     if let Some(error) = &found.error {
-        println!("{:<12} {millis:>6} {:>5}  {error}", found.source, "—");
+        println!("{:<12} {millis:>6} {:>5}  {error}", found.source, "-");
         return;
     }
     if found.hits.is_empty() {
@@ -204,7 +187,7 @@ fn report(query: &LyricsQuery, found: &Probe) {
             _ => format!("{:<12} {:>6} {:>5}", "", "", ""),
         };
         println!(
-            "{head}  {score:>6} {:>4} {:<8} {} — {}{}",
+            "{head}  {score:>6} {:>4} {:<8} {} - {}{}",
             match music::lyrics::eligible(query, hit) {
                 true => "yes",
                 false => "no",
@@ -244,24 +227,13 @@ fn shape(lyrics: &Lyrics) -> String {
     format!(
         "{} lines, {words} words, {voices} background, {secondary} lanes, spans {}",
         lines.len(),
-        lyrics.span().map(clock).unwrap_or_else(|| "—".to_owned()),
+        lyrics.span().map(clock).unwrap_or_else(|| "-".to_owned()),
     )
 }
 
 fn clock(duration: Duration) -> String {
     let seconds = duration.as_secs();
     format!("{}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn spotify_id(link: &str) -> Option<String> {
-    if let Some(rest) = link.strip_prefix("spotify:track:") {
-        return Some(rest.to_owned());
-    }
-    if let Some(rest) = link.split("open.spotify.com/track/").nth(1) {
-        return Some(cut(rest));
-    }
-    let bare = link.len() == 22 && link.chars().all(|letter| letter.is_ascii_alphanumeric());
-    bare.then(|| link.to_owned())
 }
 
 fn youtube_id(link: &str) -> Option<String> {

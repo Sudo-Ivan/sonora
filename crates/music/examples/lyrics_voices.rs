@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use music::{Lyrics, LyricsProvider, LyricsQuery, Voice, binimum, musixmatch};
+use music::{Lyrics, LyricsProvider, LyricsQuery, Voice, musixmatch};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -32,7 +32,7 @@ async fn main() {
         ("Zxqvortle Plimbath", "Nobody Realish", "", 123),
     ];
     let providers: Vec<Arc<dyn LyricsProvider>> = vec![
-        Arc::new(binimum::Binimum::new()),
+        Arc::new(music::youtube::YouTubeLyrics::new()),
         Arc::new(musixmatch::Musixmatch::new()),
     ];
 
@@ -44,7 +44,7 @@ async fn main() {
             duration: Duration::from_secs(seconds),
             track: None,
         };
-        println!("\n== {title} — {artist}");
+        println!("\n== {title} - {artist}");
         let mut gathered = Vec::new();
         for provider in &providers {
             match provider.search(&query).await {
@@ -94,7 +94,7 @@ fn counted(lyrics: &Lyrics) -> (usize, usize) {
 
 fn report(source: &str, lyrics: &Lyrics, title: &str, artist: &str, writers: &[String]) {
     let Lyrics::Synced { lines } = lyrics else {
-        println!("   {source:<12} plain ({title} — {artist})");
+        println!("   {source:<12} plain ({title} - {artist})");
         return;
     };
     let worded = lines.iter().filter(|line| line.words.is_some()).count();
@@ -104,7 +104,7 @@ fn report(source: &str, lyrics: &Lyrics, title: &str, artist: &str, writers: &[S
         .filter(|line| matches!(line.voice, Voice::Counter))
         .count();
     println!(
-        "   {source:<12} {} lines, {worded} worded, {lanes} lanes, {counter} counter-voice, writers {} | {title} — {artist}",
+        "   {source:<12} {} lines, {worded} worded, {lanes} lanes, {counter} counter-voice, writers {} | {title} - {artist}",
         lines.len(),
         writers.len()
     );

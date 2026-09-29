@@ -1,5 +1,5 @@
 //! Decryption of Deezer's `BF_CBC_STRIPE` audio: the stream is split into 2048-byte blocks
-//! and only every third block (0, 3, 6, …) is encrypted with Blowfish CBC, the cipher reset
+//! and only every third block (0, 3, 6, ...) is encrypted with Blowfish CBC, the cipher reset
 //! per block against a fixed IV. The per-track key derives from the track id and a master
 //! secret extracted at runtime from Deezer's own web player bundle.
 
@@ -190,7 +190,7 @@ fn find_bundle(html: &str) -> Option<String> {
 }
 
 /// One 8-byte half of the secret, found in the bundle as a URL-encoded hex array that starts
-/// with `first` and ends with `last`: `0x61%2C…%2C0x67`. Returned reversed.
+/// with `first` and ends with `last`: `0x61%2C...%2C0x67`. Returned reversed.
 fn find_half(source: &str, first: u8, last: u8) -> Option<[u8; 8]> {
     let needle = format!("0x{first:02x}%2C");
     let terminator = format!("0x{last:02x}");
@@ -206,7 +206,7 @@ fn find_half(source: &str, first: u8, last: u8) -> Option<[u8; 8]> {
     None
 }
 
-/// Parses `0xNN%2C…` up to and including `terminator` into 8 reversed bytes. None when the
+/// Parses `0xNN%2C...` up to and including `terminator` into 8 reversed bytes. None when the
 /// window is not exactly 8 bytes.
 fn parse_half(candidate: &str, terminator: &str) -> Option<[u8; 8]> {
     let end = candidate.find(terminator)? + terminator.len();

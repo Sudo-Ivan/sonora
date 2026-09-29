@@ -27,7 +27,7 @@ use ui::{ActiveTheme as _, MIN_CONTENT, Room, eyebrow};
 /// decorations put the compositor in charge of the frame, and `Rounding::Square` is the
 /// explicit off state. Windows applies its rounding through DWM instead (see
 /// `state::apply_window_rounding`), so this only matters for Linux/FreeBSD chrome that
-/// rounds its own corners to match — GPUI has no way to clip a subtree to a rounded parent.
+/// rounds its own corners to match - GPUI has no way to clip a subtree to a rounded parent.
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub(crate) fn window_radius(settings: &AppSettings) -> Option<Pixels> {
     if settings.server_side_decorations() {

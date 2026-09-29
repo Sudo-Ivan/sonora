@@ -15,7 +15,7 @@ const CANDIDATES: usize = 3;
 const AGENT: &str = concat!(
     "sonora/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/sonorahq/sonora)"
+    " (https://github.com/Sudo-Ivan/sonora)"
 );
 
 pub struct NetEase {

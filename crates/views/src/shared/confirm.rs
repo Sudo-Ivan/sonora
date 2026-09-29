@@ -14,7 +14,6 @@ pub(crate) enum Kind {
     Artists(usize),
     Playlists(usize),
     DeleteTrackFiles(usize),
-    Widevine,
 }
 
 impl Kind {
@@ -23,7 +22,6 @@ impl Kind {
             Self::PlaylistSongs(_) => t!("confirm-remove-playlist-title"),
             Self::History(_) => t!("confirm-remove-history-title"),
             Self::DeleteTrackFiles(_) => t!("confirm-delete-track-files-title"),
-            Self::Widevine => t!("confirm-uninstall-widevine-title"),
             _ => t!("confirm-remove-library-title"),
         }
     }
@@ -37,15 +35,11 @@ impl Kind {
             Self::Artists(count) => t!("confirm-remove-artists", count = count),
             Self::Playlists(count) => t!("confirm-remove-playlists", count = count),
             Self::DeleteTrackFiles(count) => t!("confirm-delete-track-files", count = count),
-            Self::Widevine => t!("confirm-uninstall-widevine"),
         }
     }
 
     fn action(&self) -> gpui::SharedString {
-        match self {
-            Self::Widevine => t!("settings-widevine-uninstall"),
-            _ => t!("common-delete"),
-        }
+        t!("common-delete")
     }
 }
 

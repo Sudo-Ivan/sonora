@@ -2,22 +2,11 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
-use crate::spotify::SpotifyProvider;
 use crate::youtube::YouTubeProvider;
 use crate::{Album, MusicApi, MusicProvider, ProviderSession};
 
-const SPOTIFY_ALBUMS: &[&str] = &["1vHPNtDfd0V29ol70EMqP8", "2Ef2E0yk88zQfjvOJunK8A"];
 const YOUTUBE_ALBUMS: &[&str] = &["MPREb_vupB1BNh7XE", "MPREb_3SWMG6RbCTQ"];
 const VERIFY_ATTEMPTS: usize = 30;
-
-#[tokio::test]
-#[ignore = "changes the saved albums of the connected Spotify account"]
-async fn spotify_can_add_and_remove_an_album_for_the_connected_account() -> Result<()> {
-    let provider = SpotifyProvider::from_env();
-    let session = connected(&provider).await?;
-
-    exercise_album_cycles("Spotify", session.api.as_ref(), SPOTIFY_ALBUMS).await
-}
 
 #[tokio::test]
 #[ignore = "changes the saved albums of the connected YouTube Music account"]

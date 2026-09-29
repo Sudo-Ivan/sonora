@@ -538,8 +538,8 @@ impl Savable for Track {
     }
 
     /// Puts the track onto the shelf's own pages where the library is a set apart from the
-    /// favorites. Apple Music, the one such provider, adds a favorited song to the library
-    /// itself, so the Songs page lists it without a reload.
+    /// favorites. Such a provider adds a favorited song to the library itself, so the Songs
+    /// page lists it without a reload.
     fn admit(library: &mut Library, track: Self, cx: &mut Context<Library>) {
         let Some(id) = track.id.clone() else {
             return;

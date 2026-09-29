@@ -22,7 +22,7 @@ fn path() -> PathBuf {
 }
 
 /// Extracts the `arl` value from what the user pastes: a full `Cookie` header, a lone
-/// `arl=…` pair, or the bare token. Refuses anything without one.
+/// `arl=...` pair, or the bare token. Refuses anything without one.
 pub fn arl(input: &str) -> Result<String> {
     let trimmed = input.trim();
     for pair in trimmed.split(';') {

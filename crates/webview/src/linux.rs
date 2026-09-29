@@ -2,7 +2,7 @@
 //!
 //! Nothing links webkit2gtk. GPUI talks to X11 or Wayland itself and the app has no GTK anywhere
 //! else, so the library is opened at runtime with `dlopen` and a system without it simply answers
-//! `supported() == false` — which is also what keeps the Flatpak runtime, which ships no
+//! `supported() == false` - which is also what keeps the Flatpak runtime, which ships no
 //! webkitgtk, building and running unchanged. `dlsym` walks a handle's dependencies, so the one
 //! webkit2gtk handle resolves gtk, glib, gobject and soup too and no other soname is named here.
 //!

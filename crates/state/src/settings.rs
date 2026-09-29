@@ -33,59 +33,6 @@ use crate::pins::PinSort;
 use crate::queue::{Resume, gap_target};
 use crate::{Outcome, Repeat, Sonora, Toasts};
 
-/// Which panel the right sidebar shows.
-/// What the Discord status calls itself. `Provider` asks the provider the track came from, so
-/// local files say Local Music rather than the provider's own name. `ArtistTitle` shows as
-/// "Artist - Title".
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DiscordName {
-    #[default]
-    Sonora,
-    Provider,
-    Music,
-    Title,
-    Artist,
-    ArtistTitle,
-}
-
-impl DiscordName {
-    pub const ALL: [Self; 6] = [
-        Self::Sonora,
-        Self::Provider,
-        Self::Music,
-        Self::Title,
-        Self::Artist,
-        Self::ArtistTitle,
-    ];
-
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Sonora => "sonora",
-            Self::Provider => "provider",
-            Self::Music => "music",
-            Self::Title => "title",
-            Self::Artist => "artist",
-            Self::ArtistTitle => "artist-title",
-        }
-    }
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Sonora => "settings-discord-name-sonora",
-            Self::Provider => "settings-discord-name-provider",
-            Self::Music => "settings-discord-name-music",
-            Self::Title => "settings-discord-name-title",
-            Self::Artist => "settings-discord-name-artist",
-            Self::ArtistTitle => "settings-discord-name-artist-title",
-        }
-    }
-
-    pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|name| name.id() == id)
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum FullscreenControlsAutohide {
@@ -124,6 +71,7 @@ impl FullscreenControlsAutohide {
     }
 }
 
+/// Which panel the right sidebar shows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SideTab {
@@ -279,14 +227,6 @@ struct Values {
     /// turning it back on restores the curve.
     equalizer_bands: Vec<f32>,
     sleep_timer: bool,
-    discord_presence: bool,
-    discord_name: DiscordName,
-    discord_show_paused: bool,
-    discord_badge: bool,
-    discord_without_details: bool,
-    discord_sonora_button: bool,
-    discord_provider_button: bool,
-    artwork_for_local_files: bool,
     lyrics_for_local_files: bool,
     prefer_local_lyrics: bool,
     /// Set once Local has been added to a list saved before it existed, so a user who turns it
@@ -425,27 +365,12 @@ impl Default for Values {
             equalizer: false,
             equalizer_bands: vec![0.; equalizer::BANDS],
             sleep_timer: false,
-            discord_presence: false,
-            discord_name: DiscordName::Sonora,
-            discord_show_paused: false,
-            discord_badge: false,
-            discord_without_details: false,
-            discord_sonora_button: true,
-            discord_provider_button: true,
-            artwork_for_local_files: true,
             lyrics_for_local_files: true,
             prefer_local_lyrics: false,
             local_lyrics_offered: false,
-            lyrics_providers: [
-                LOCAL,
-                "Spotify",
-                "YouTube Music",
-                "Apple Music",
-                "Musixmatch",
-                "LrcLib",
-            ]
-            .map(str::to_owned)
-            .to_vec(),
+            lyrics_providers: [LOCAL, "YouTube Music", "Musixmatch", "LrcLib"]
+                .map(str::to_owned)
+                .to_vec(),
             karaoke_lyrics: true,
             blur_lyrics: true,
             romanized_lyrics: true,
@@ -731,47 +656,6 @@ impl AppSettings {
 
     pub fn sleep_timer(&self) -> bool {
         self.values.sleep_timer
-    }
-
-    /// Whether the playing track is published to a local Discord client.
-    pub fn discord_presence(&self) -> bool {
-        self.values.discord_presence
-    }
-
-    /// What the Discord status names itself after "listening to".
-    pub fn discord_name(&self) -> DiscordName {
-        self.values.discord_name
-    }
-
-    /// Whether the Discord status stays up while the track is paused.
-    pub fn discord_show_paused(&self) -> bool {
-        self.values.discord_show_paused
-    }
-
-    /// Whether the Discord status carries the badge of the provider the track came from.
-    pub fn discord_badge(&self) -> bool {
-        self.values.discord_badge
-    }
-
-    /// Whether the Discord status leaves the track out and only says that music is playing.
-    pub fn discord_without_details(&self) -> bool {
-        self.values.discord_without_details
-    }
-
-    /// Whether the Discord status carries a button that opens the Sonora project page.
-    pub fn discord_sonora_button(&self) -> bool {
-        self.values.discord_sonora_button
-    }
-
-    /// Whether the Discord status carries a button that opens the track on its provider.
-    pub fn discord_provider_button(&self) -> bool {
-        self.values.discord_provider_button
-    }
-
-    /// Whether a local file's artist and album may be sent to a public catalogue to find a cover
-    /// for its Discord status. Streamed tracks are looked up regardless.
-    pub fn artwork_for_local_files(&self) -> bool {
-        self.values.artwork_for_local_files
     }
 
     pub fn lyrics_for_local_files(&self) -> bool {
@@ -1112,52 +996,12 @@ impl AppSettings {
         self.schedule_save(cx);
     }
 
-    pub fn set_discord_presence(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.discord_presence = enabled;
-        self.schedule_save(cx);
-    }
-
-    pub fn set_discord_name(&mut self, name: DiscordName, cx: &mut Context<Self>) {
-        self.values.discord_name = name;
-        self.schedule_save(cx);
-    }
-
     pub fn set_fullscreen_controls_autohide(
         &mut self,
         fca: FullscreenControlsAutohide,
         cx: &mut Context<Self>,
     ) {
         self.values.appearance.fullscreen_controls_autohide = fca.id().to_owned();
-        self.schedule_save(cx);
-    }
-
-    pub fn set_discord_show_paused(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.discord_show_paused = enabled;
-        self.schedule_save(cx);
-    }
-
-    pub fn set_discord_badge(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.discord_badge = enabled;
-        self.schedule_save(cx);
-    }
-
-    pub fn set_discord_without_details(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.discord_without_details = enabled;
-        self.schedule_save(cx);
-    }
-
-    pub fn set_discord_sonora_button(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.discord_sonora_button = enabled;
-        self.schedule_save(cx);
-    }
-
-    pub fn set_discord_provider_button(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.discord_provider_button = enabled;
-        self.schedule_save(cx);
-    }
-
-    pub fn set_artwork_for_local_files(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.artwork_for_local_files = enabled;
         self.schedule_save(cx);
     }
 
@@ -2449,8 +2293,8 @@ mod tests {
 
     #[test]
     fn the_saved_position_follows_the_same_track() {
-        let previous = resume("spotify", "abc", 42.);
-        let mut next = resume("spotify", "abc", 0.);
+        let previous = resume("deezer", "abc", 42.);
+        let mut next = resume("deezer", "abc", 0.);
 
         carry(Some(&previous), &mut next);
 
@@ -2459,8 +2303,8 @@ mod tests {
 
     #[test]
     fn a_new_track_starts_from_the_beginning() {
-        let previous = resume("spotify", "abc", 42.);
-        let mut next = resume("spotify", "def", 0.);
+        let previous = resume("deezer", "abc", 42.);
+        let mut next = resume("deezer", "def", 0.);
 
         carry(Some(&previous), &mut next);
 
@@ -2469,7 +2313,7 @@ mod tests {
 
     #[test]
     fn another_provider_never_inherits_a_position() {
-        let previous = resume("spotify", "abc", 42.);
+        let previous = resume("deezer", "abc", 42.);
         let mut next = resume("youtube", "abc", 0.);
 
         carry(Some(&previous), &mut next);
@@ -2479,14 +2323,14 @@ mod tests {
 
     #[test]
     fn a_first_record_starts_from_the_beginning() {
-        let mut next = resume("spotify", "abc", 42.);
+        let mut next = resume("deezer", "abc", 42.);
 
         carry(None, &mut next);
 
         assert_eq!(next.position, 0.);
     }
 
-    const SLUGS: [&str; 2] = ["spotify", "local"];
+    const SLUGS: [&str; 2] = ["deezer", "local"];
 
     fn pin(id: &str) -> Pin {
         Pin::new(PinKind::Album, id, id)
@@ -2517,7 +2361,7 @@ mod tests {
             volume: 0.2,
             provider: "youtube".to_owned(),
             sidebar_right_open: true,
-            pinned: vec![held("spotify", "album")],
+            pinned: vec![held("deezer", "album")],
             ..StateValues::default()
         };
 
@@ -2539,72 +2383,72 @@ mod tests {
 
     #[test]
     fn a_fresh_pin_lands_at_the_gap() {
-        let mut pinned = vec![held("spotify", "a"), held("spotify", "b")];
+        let mut pinned = vec![held("deezer", "a"), held("deezer", "b")];
 
-        assert!(place(&mut pinned, "spotify", pin("c"), Some(1), &SLUGS));
+        assert!(place(&mut pinned, "deezer", pin("c"), Some(1), &SLUGS));
         assert_eq!(ids(&pinned), ["a", "c", "b"]);
     }
 
     #[test]
     fn no_gap_appends() {
-        let mut pinned = vec![held("spotify", "a")];
+        let mut pinned = vec![held("deezer", "a")];
 
-        assert!(place(&mut pinned, "spotify", pin("b"), None, &SLUGS));
+        assert!(place(&mut pinned, "deezer", pin("b"), None, &SLUGS));
         assert_eq!(ids(&pinned), ["a", "b"]);
     }
 
     #[test]
     fn a_gap_past_the_end_still_appends() {
-        let mut pinned = vec![held("spotify", "a")];
+        let mut pinned = vec![held("deezer", "a")];
 
-        assert!(place(&mut pinned, "spotify", pin("b"), Some(9), &SLUGS));
+        assert!(place(&mut pinned, "deezer", pin("b"), Some(9), &SLUGS));
         assert_eq!(ids(&pinned), ["a", "b"]);
     }
 
     #[test]
     fn pinning_twice_moves_instead_of_duplicating() {
         let mut pinned = vec![
-            held("spotify", "a"),
-            held("spotify", "b"),
-            held("spotify", "c"),
+            held("deezer", "a"),
+            held("deezer", "b"),
+            held("deezer", "c"),
         ];
 
-        assert!(place(&mut pinned, "spotify", pin("a"), Some(3), &SLUGS));
+        assert!(place(&mut pinned, "deezer", pin("a"), Some(3), &SLUGS));
         assert_eq!(ids(&pinned), ["b", "c", "a"]);
     }
 
     #[test]
     fn a_move_backwards_keeps_the_gap() {
         let mut pinned = vec![
-            held("spotify", "a"),
-            held("spotify", "b"),
-            held("spotify", "c"),
+            held("deezer", "a"),
+            held("deezer", "b"),
+            held("deezer", "c"),
         ];
 
-        assert!(place(&mut pinned, "spotify", pin("c"), Some(0), &SLUGS));
+        assert!(place(&mut pinned, "deezer", pin("c"), Some(0), &SLUGS));
         assert_eq!(ids(&pinned), ["c", "a", "b"]);
     }
 
     #[test]
     fn the_gaps_around_an_item_are_no_ops() {
         let mut pinned = vec![
-            held("spotify", "a"),
-            held("spotify", "b"),
-            held("spotify", "c"),
+            held("deezer", "a"),
+            held("deezer", "b"),
+            held("deezer", "c"),
         ];
 
-        assert!(!place(&mut pinned, "spotify", pin("b"), Some(1), &SLUGS));
-        assert!(!place(&mut pinned, "spotify", pin("b"), Some(2), &SLUGS));
+        assert!(!place(&mut pinned, "deezer", pin("b"), Some(1), &SLUGS));
+        assert!(!place(&mut pinned, "deezer", pin("b"), Some(2), &SLUGS));
         assert_eq!(ids(&pinned), ["a", "b", "c"]);
     }
 
     #[test]
     fn kinds_with_the_same_id_stay_apart() {
-        let mut pinned = vec![held("spotify", "x")];
+        let mut pinned = vec![held("deezer", "x")];
 
         assert!(place(
             &mut pinned,
-            "spotify",
+            "deezer",
             Pin::new(PinKind::Song, "x", "x"),
             None,
             &SLUGS

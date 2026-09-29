@@ -1,17 +1,14 @@
 //! One playback engine, for every provider whose tracks are a file to decode.
 //!
-//! Two threads share the work the way the Spotify path does: a tokio thread fetches, and one
-//! audio thread decodes and feeds [`crate::sink::Paced`]. Neither the audio callback nor the
-//! runtime ever waits on the network, so a track starts as soon as its first seconds are in.
-//! The engine owns everything that is the same whoever the provider is: the queue of commands,
-//! the preload, the gapless join, where a position is reported from, and what a lost output
-//! device does.
+//! Two threads share the work: a tokio thread fetches, and one audio thread decodes and feeds
+//! [`crate::sink::Paced`]. Neither the audio callback nor the runtime ever waits on the
+//! network, so a track starts as soon as its first seconds are in. The engine owns everything
+//! that is the same whoever the provider is: the queue of commands, the preload, the gapless
+//! join, where a position is reported from, and what a lost output device does.
 //!
-//! A provider supplies [`Fetch`]: how to get a track and how to open a decoder over it. Every
-//! provider but Spotify does, whose decoding librespot owns. Local reads a file from disk,
-//! YouTube downloads the whole track, Subsonic hands over a plain response, Deezer decrypts
-//! Blowfish stripes as they arrive, and Apple Music indexes CENC fragments and decrypts each
-//! sample through a CDM as the decoder reaches it.
+//! A provider supplies [`Fetch`]: how to get a track and how to open a decoder over it. Local
+//! reads a file from disk, YouTube downloads the whole track, Subsonic hands over a plain
+//! response, and Deezer decrypts Blowfish stripes as they arrive.
 //!
 //! Loudness normalisation lives here too. A provider only reports how loud a track is, and the
 //! engine decides what gain that earns.
@@ -33,8 +30,8 @@ use crate::{PlaybackConfig, PlaybackEvent, PlaybackEvents, Player};
 /// How many frames the decoder hands over at a time. Small enough that a skip is heard at once,
 /// large enough that the queue is not rebuilt for every few samples.
 const CHUNK: usize = 4096;
-/// The level normalisation brings every track to, in LUFS. Spotify and YouTube both play at
-/// about this level, so a track sounds as loud here whichever service it came from.
+/// The level normalisation brings every track to, in LUFS. The services play at about this
+/// level, so a track sounds as loud here whichever service it came from.
 const TARGET_LUFS: f32 = -14.0;
 /// The level ReplayGain 2.0 measures its gain against, in LUFS.
 const REPLAYGAIN_LUFS: f32 = -18.0;

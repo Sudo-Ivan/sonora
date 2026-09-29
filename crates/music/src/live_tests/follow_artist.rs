@@ -2,22 +2,11 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 
-use crate::spotify::SpotifyProvider;
 use crate::youtube::YouTubeProvider;
 use crate::{MusicApi, MusicProvider, ProviderSession};
 
-const SPOTIFY_ARTISTS: &[&str] = &["1WAB4gjjNfQpAgT5SoAbRE"];
 const YOUTUBE_ARTISTS: &[&str] = &["UCilQecy8UKHUSgE6l-uxP1Q"];
 const VERIFY_ATTEMPTS: usize = 30;
-
-#[tokio::test]
-#[ignore = "changes the followed artists of the connected Spotify account"]
-async fn spotify_can_follow_and_unfollow_an_artist_for_the_connected_account() -> Result<()> {
-    let provider = SpotifyProvider::from_env();
-    let session = connected(&provider).await?;
-
-    exercise_artist_cycles(session.api.as_ref(), SPOTIFY_ARTISTS).await
-}
 
 #[tokio::test]
 #[ignore = "changes the followed artists of the connected YouTube Music account"]

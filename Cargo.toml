@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.41.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/sonorahq/sonora"
+repository = "https://github.com/Sudo-Ivan/sonora"
 
 [workspace.dependencies]
 embed = { path = "crates/embed" }
@@ -20,7 +20,6 @@ router = { path = "crates/router" }
 ui = { path = "crates/ui" }
 views = { path = "crates/views" }
 webview = { path = "crates/webview" }
-widevine = { path = "crates/widevine" }
 
 anyhow = "1.0"
 async-trait = "0.1"
@@ -28,11 +27,9 @@ base64 = "0.22"
 blowfish = "0.9"
 bytes = "1"
 cbc = "0.1"
-cc = "1"
 flate2 = "1"
 cpal = "0.17"
 dirs = "6.0"
-discord-rich-presence = "1.1"
 deunicode = "1.6"
 env_logger = "0.11"
 fastrand = "2.5"
@@ -80,6 +77,7 @@ jiff = { version = "0.2", default-features = false, features = [
 kakasi = "0.1"
 ksni = { version = "0.3", default-features = false, features = ["async-io", "blocking"] }
 zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+landlock = "0.4.7"
 libc = "0.2"
 lofty = "0.25"
 log = "0.4"
@@ -87,7 +85,6 @@ md-5 = "0.10"
 moka = { version = "0.12.15", features = ["future", "sync"] }
 mpris-server = "0.10"
 notify = "8.2"
-oauth2 = "5.0"
 open = "5.4"
 block2 = "0.6"
 objc2 = "0.6"
@@ -156,19 +153,7 @@ unic-langid = { version = "0.9", features = ["macros"] }
 unicode-segmentation = "1.12"
 ytmusic = { git = "https://github.com/sonorahq/ytmusic-rs", rev = "d4ec8ad" }
 
-librespot-core = { version = "0.8.0", default-features = false, features = [
-  "rustls-tls-native-roots",
-] }
-librespot-oauth = { version = "0.8.0", default-features = false, features = [
-  "rustls-tls-native-roots",
-] }
-librespot-playback = { version = "0.8.0", default-features = false, features = [
-  "rodio-backend",
-  "rustls-tls-native-roots",
-] }
-librespot-protocol = "0.8.0"
 percent-encoding = "2.3"
-protobuf = "3"
 opensubsonic = "0.4.0"
 tokio = { version = "1.53", features = [
   "rt-multi-thread",
@@ -180,12 +165,6 @@ tokio = { version = "1.53", features = [
 ] }
 
 [patch.crates-io]
-librespot-audio = { git = "https://github.com/sonorahq/librespot", rev = "d16b7fa014aef21c0786a68f07c685c30df5b646" }
-librespot-core = { git = "https://github.com/sonorahq/librespot", rev = "d16b7fa014aef21c0786a68f07c685c30df5b646" }
-librespot-metadata = { git = "https://github.com/sonorahq/librespot", rev = "d16b7fa014aef21c0786a68f07c685c30df5b646" }
-librespot-oauth = { git = "https://github.com/sonorahq/librespot", rev = "d16b7fa014aef21c0786a68f07c685c30df5b646" }
-librespot-playback = { git = "https://github.com/sonorahq/librespot", rev = "d16b7fa014aef21c0786a68f07c685c30df5b646" }
-librespot-protocol = { git = "https://github.com/sonorahq/librespot", rev = "d16b7fa014aef21c0786a68f07c685c30df5b646" }
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "4aa22e85e5ad5565c45dfdda95051158eb6b56c3" }
 
 [profile.release]

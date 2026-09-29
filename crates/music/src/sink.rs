@@ -245,8 +245,8 @@ impl Paced {
     }
 
     /// Queues one packet. A packet the cue refuses is dropped, so a decoder that has been
-    /// retired makes no sound while it winds down. This never blocks: a caller with nothing
-    /// else to do waits through `drain`, one with commands to answer waits through `full`.
+    /// retired makes no sound while it winds down. This never blocks: a caller waits on
+    /// `full` before writing again.
     pub fn write(&mut self, samples: SamplesBuffer) -> Result<(), Gone> {
         if self.output_changed() {
             return Err(self.disconnected());
@@ -287,17 +287,6 @@ impl Paced {
                 Err(self.disconnected())
             }
         }
-    }
-
-    /// Waits until there is room for another packet.
-    pub fn drain(&mut self) -> Result<(), Gone> {
-        while self.full() {
-            if self.output_changed() {
-                return Err(self.disconnected());
-            }
-            std::thread::sleep(DRAIN_POLL);
-        }
-        Ok(())
     }
 
     /// How long a full queue takes to play out. This is how far a decoder runs ahead of what

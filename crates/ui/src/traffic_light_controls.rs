@@ -58,7 +58,7 @@ impl Control {
 }
 
 /// Traffic-light styled window controls: three plain colored dots that only reveal their
-/// glyph on hover, in the familiar close/minimize/maximize order and coloring (not themed —
+/// glyph on hover, in the familiar close/minimize/maximize order and coloring (not themed -
 /// the whole point of this style is the recognizable, unthemed convention).
 /// Position mirrors [`crate::WindowControls`]'s own `leading` flag: on the left the order
 /// reads red, yellow, green; on the right it's mirrored so close stays at the outer edge.

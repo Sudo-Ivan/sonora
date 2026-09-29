@@ -6,9 +6,6 @@ license.workspace = true
 
 [features]
 bundled-sqlite = ["rusqlite/bundled", "storage/bundled-sqlite"]
-# The host for the Widevine CDM, which Apple Music playback needs. Off by default: it compiles a
-# C++ shim, so it wants a C++ compiler, and nothing else in the crate wants it.
-widevine = ["widevine/cdm"]
 
 [dependencies]
 anyhow.workspace = true
@@ -20,25 +17,17 @@ cbc.workspace = true
 fastrand.workspace = true
 flate2.workspace = true
 cpal.workspace = true
-futures.workspace = true
 deunicode.workspace = true
 dirs.workspace = true
 http.workspace = true
-jiff.workspace = true
-librespot-core.workspace = true
-librespot-playback.workspace = true
-librespot-protocol.workspace = true
 lofty.workspace = true
 kakasi.workspace = true
 log.workspace = true
 md-5.workspace = true
-oauth2.workspace = true
 open.workspace = true
 opensubsonic.workspace = true
 percent-encoding.workspace = true
-protobuf.workspace = true
 reqwest.workspace = true
-roxmltree.workspace = true
 rodio = { workspace = true, features = ["symphonia-aac", "symphonia-alac", "symphonia-isomp4", "symphonia-libopus", "symphonia-mkv", "flac", "mp3", "vorbis", "wav"] }
 rtrb.workspace = true
 rusqlite.workspace = true
@@ -49,7 +38,6 @@ serde_norway.workspace = true
 storage.workspace = true
 symphonia.workspace = true
 tokio.workspace = true
-widevine.workspace = true
 ytmusic.workspace = true
 
 [dev-dependencies]

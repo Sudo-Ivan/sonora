@@ -1,6 +1,6 @@
 //! Deezer data access over two APIs: the public `api.deezer.com` for the catalog, and the
 //! web gateway `gw-light.php` (what the browser player uses) for anything scoped to the
-//! account — profile, favorites, playlists — plus the `media.deezer.com/v1/get_url` call that
+//! account - profile, favorites, playlists - plus the `media.deezer.com/v1/get_url` call that
 //! hands out the encrypted stream urls.
 
 use std::collections::{HashMap, HashSet};
@@ -106,8 +106,8 @@ pub struct Opened {
     pub key: decrypt::Secret,
     pub duration: Option<Duration>,
     /// The gateway's `GAIN`. Despite the name it is the track's integrated loudness rather than
-    /// an adjustment, and it lands within about a decibel of Apple's LUFS for the same
-    /// recording.
+    /// an adjustment, and it lands within about a decibel of the LUFS other services report for
+    /// the same recording.
     pub loudness: Option<Loudness>,
 }
 

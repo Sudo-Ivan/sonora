@@ -469,7 +469,7 @@ fn structural(text: &str) -> bool {
     }
     let label = text
         .trim_matches(|letter: char| {
-            letter.is_whitespace() || matches!(letter, '[' | ']' | '-' | '—')
+            letter.is_whitespace() || matches!(letter, '[' | ']' | '-' | '–')
         })
         .to_ascii_lowercase();
     let wrapped = (text.starts_with('[') && text.ends_with(']'))

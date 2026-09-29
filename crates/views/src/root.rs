@@ -704,7 +704,7 @@ impl Render for Root {
 
         // GPUI can't clip a subtree to a rounded parent (its content mask is a plain
         // rectangle), so on Linux/FreeBSD each edge of the chrome that actually touches a
-        // corner rounds itself to match — see `chrome::window_radius`, and `TitleBar` /
+        // corner rounds itself to match - see `chrome::window_radius`, and `TitleBar` /
         // `PlayerBar` for the top and bottom edges. Rounding the root too keeps its own
         // background quad correct and costs nothing.
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]

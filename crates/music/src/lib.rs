@@ -1,10 +1,6 @@
-pub mod apple;
-pub mod artwork;
 mod audio;
-pub mod binimum;
 pub mod credentials;
 pub mod deezer;
-pub mod drm;
 pub mod engine;
 pub mod equalizer;
 pub mod escape;
@@ -22,7 +18,6 @@ pub mod progress;
 pub mod scrobble;
 mod sink;
 mod spectrum;
-pub mod spotify;
 mod stream;
 pub mod subsonic;
 mod trim;
@@ -460,7 +455,7 @@ pub enum Shape {
 /// never put in front of the listener.
 ///
 /// This is about the service, not the account: something a provider simply does not have, like
-/// a station Apple Music will not list or a play count Deezer does not keep. A capability that
+/// a station it will not list or a play count it does not keep. A capability that
 /// is off hides its button, its menu item and its column, rather than showing one that fails
 /// when pressed. A provider that gains one flips a flag here and the UI follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -473,7 +468,7 @@ pub struct Capabilities {
     pub playcounts: bool,
     /// The listener has a library apart from their favorites, which a track or an album can be
     /// put into and taken out of through `set_in_library`. Off where the library is the
-    /// favorites, as on Spotify, and where it is fixed, as on a self-hosted server.
+    /// favorites and where it is fixed, as on a self-hosted server.
     pub library: bool,
     /// The provider keeps sidebar pins of its own, listed by `pin_targets` and changed
     /// through `set_pinned`. Off, a pin lives in Sonora's settings alone.
@@ -482,8 +477,8 @@ pub struct Capabilities {
 
 impl Capabilities {
     /// What a full streaming service offers. A library apart from favorites is not among
-    /// them: on most services the two are one thing. We love Apple Music. Pins of the
-    /// provider's own are not either, since only Spotify and Apple Music keep any.
+    /// them: on most services the two are one thing. Pins of the provider's own are not
+    /// either, since no provider left keeps any.
     pub const ALL: Self = Self {
         follow_artists: true,
         radio: true,
@@ -540,12 +535,12 @@ pub struct SignInFailure(pub SignInProblem);
 impl std::fmt::Display for SignInFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let reason = match self.0 {
-            SignInProblem::Premium => "the account has no Spotify Premium",
+            SignInProblem::Premium => "the account has no paid plan the provider wants",
             SignInProblem::Region => "the account is out of its home region",
             SignInProblem::Credentials => "the stored credentials are no longer valid",
             SignInProblem::Network => "the provider could not be reached",
             SignInProblem::Cancelled => "authorization was cancelled in the browser",
-            SignInProblem::Refused => "Spotify refused the session",
+            SignInProblem::Refused => "the provider refused the session",
         };
         write!(f, "{reason}")
     }
@@ -648,22 +643,6 @@ pub trait MusicProvider: Send + Sync {
     /// looking for one.
     fn reach(&self) -> Option<String> {
         None
-    }
-    /// What a status calls this provider after "listening to". A service answers with its own
-    /// name; one that is only the user's own files says what the files are instead.
-    fn listening_to(&self) -> &'static str {
-        self.name()
-    }
-    /// Whether this provider's tracks need the Widevine module to play. The app fetches the
-    /// module once such a provider has an account, and does not go near it otherwise.
-    fn protected(&self) -> bool {
-        false
-    }
-    /// Whether the artwork urls this provider hands out can be given to another service. A path
-    /// on disk means nothing elsewhere, and a self-hosted url carries the credentials that fetch
-    /// it, so the default is no.
-    fn public_art(&self) -> bool {
-        false
     }
     async fn restore(&self) -> Result<Option<ProviderSession>>;
     async fn sign_in(

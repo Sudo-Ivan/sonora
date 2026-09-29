@@ -1,8 +1,6 @@
 use anyhow::{Context as _, Result, bail};
 
-use crate::apple::AppleProvider;
 use crate::deezer::DeezerProvider;
-use crate::spotify::SpotifyProvider;
 use crate::subsonic::{SubsonicClient, auth};
 use crate::youtube::YouTubeProvider;
 use crate::{MusicApi, MusicProvider, ReleaseType};
@@ -10,12 +8,6 @@ use crate::{MusicApi, MusicProvider, ReleaseType};
 /// A release every catalogue files as an EP, and the query that finds it.
 const ARTIST: &str = "Sylosis";
 const TITLE: &str = "The Path";
-
-#[tokio::test]
-#[ignore = "reads the catalogue through the stored Spotify session"]
-async fn spotify_labels_an_ep_as_one() -> Result<()> {
-    album_is_an_ep(&SpotifyProvider::from_env()).await
-}
 
 #[tokio::test]
 #[ignore = "reads the catalogue through the stored YouTube Music session"]
@@ -27,12 +19,6 @@ async fn youtube_labels_an_ep_as_one() -> Result<()> {
 #[ignore = "reads the catalogue through the stored Deezer session"]
 async fn deezer_labels_an_ep_as_one() -> Result<()> {
     album_is_an_ep(&DeezerProvider::new()).await
-}
-
-#[tokio::test]
-#[ignore = "reads the catalogue through the stored Apple Music session"]
-async fn apple_labels_an_ep_as_one() -> Result<()> {
-    album_is_an_ep(&AppleProvider::new()).await
 }
 
 /// Runs against the server in `SONORA_SUBSONIC_SERVER`, signed in with `SONORA_SUBSONIC_USERNAME`
@@ -49,6 +35,7 @@ async fn subsonic_labels_an_ep_as_one() -> Result<()> {
         username,
         password,
         &signature,
+        std::env::var("SONORA_SUBSONIC_INSECURE_TLS").is_ok(),
     )?;
     ep_is_labelled("Subsonic", &client).await
 }

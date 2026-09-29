@@ -2,8 +2,6 @@ mod artist;
 mod catalog;
 mod cover;
 mod detail;
-mod discord;
-mod drm;
 mod genre;
 mod history;
 mod home;
@@ -29,14 +27,12 @@ mod song;
 mod tags;
 mod toast;
 mod updates;
-mod usage;
 mod wake;
 mod window_shape;
 
 pub use artist::ArtistDetail;
 pub use cover::Cover;
 pub use detail::{Collection, Detail, Header};
-pub use drm::{CdmState, Drm};
 pub use genre::{GenreDetails, Genres};
 pub use history::{History, HistoryState};
 pub use home::Home;
@@ -56,14 +52,13 @@ pub use scrobble::{ScrobbleRow, ScrobbleState, Scrobbling};
 pub use search::{AlbumHit, ArtistHit, Hit, Kind, PlaylistHit, Search};
 pub use session::{Failure, ProviderInfo, Session, SessionEvent, SessionState};
 pub use settings::{
-    AppSettings, DiscordName, FilterValue, FullscreenControlsAutohide, Reloaded,
-    RomanizationScripts, SYSTEM_FONT, SideTab, remember_window, window_placement,
+    AppSettings, FilterValue, FullscreenControlsAutohide, Reloaded, RomanizationScripts,
+    SYSTEM_FONT, SideTab, remember_window, window_placement,
 };
 pub use song::SongDetail;
 pub use tags::{TagState, Tags};
 pub use toast::{Outcome, Target, Toast, Toasts};
 pub use updates::{Release, UpdateState, Updates};
-pub use usage::Usage;
 pub use wake::Wake;
 pub use window_shape::{apply_window_rounding, install_rounded_window_hook};
 
@@ -159,7 +154,6 @@ pub(crate) fn settled<T>(result: Result<T>, cx: &mut gpui::App) -> std::result::
 pub struct Sonora {
     pub session: Entity<Session>,
     pub cover: Entity<Cover>,
-    pub drm: Entity<Drm>,
     pub library: Entity<Library>,
     pub history: Entity<History>,
     pub lyrics: Entity<Lyrics>,
@@ -174,7 +168,6 @@ pub struct Sonora {
     pub scrobbling: Entity<Scrobbling>,
     pub settings: Entity<AppSettings>,
     pub updates: Entity<Updates>,
-    pub usage: Entity<Usage>,
     pub wake: Entity<Wake>,
 }
 
@@ -247,25 +240,14 @@ pub fn init(
         )
     });
     let cover = cx.new(|cx| Cover::new(session.clone(), playback.clone(), io.clone(), cx));
-    let drm = cx.new(|cx| Drm::new(session.clone(), io.clone(), cx));
     let updates = cx.new(|cx| Updates::new(settings.clone(), io.clone(), cx));
-    let usage = cx.new(|cx| Usage::new(session.clone(), database, io.clone(), cx));
     let pins = cx.new(|cx| Pins::new(settings.clone(), library.clone(), session.clone(), cx));
     let potoken = potoken::attach(cx);
     let wake = cx.new(|cx| Wake::new(settings.clone(), playback.clone(), io.clone(), cx));
-    discord::attach(
-        playback.clone(),
-        settings.clone(),
-        session.clone(),
-        cover.clone(),
-        io,
-        cx,
-    );
 
     cx.set_global(Sonora {
         session,
         cover,
-        drm,
         library,
         history,
         lyrics,
@@ -278,7 +260,6 @@ pub fn init(
         scrobbling,
         settings,
         updates,
-        usage,
         wake,
     });
 }

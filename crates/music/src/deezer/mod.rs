@@ -111,11 +111,6 @@ impl MusicProvider for DeezerProvider {
         auth::load().is_some()
     }
 
-    fn public_art(&self) -> bool {
-        // covers live on cdn-images.dzcdn.net, open to anyone with the url
-        true
-    }
-
     async fn restore(&self) -> Result<Option<ProviderSession>> {
         Self::restore_stored().await
     }

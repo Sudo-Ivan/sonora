@@ -128,7 +128,7 @@ pub(crate) fn headed(lines: &mut Vec<LyricsLine>, title: &str, artists: &[String
             return true;
         }
         let claimed = first
-            .split(['-', '–', '—'])
+            .split(['-', '-', '-'])
             .map(str::trim)
             .filter(|part| !part.is_empty() && !artists.iter().any(|artist| loosely(part, artist)))
             .max_by_key(|part| part.len());

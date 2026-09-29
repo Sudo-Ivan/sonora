@@ -36,7 +36,7 @@ const SYSTEM_FILLS: bool = cfg!(target_os = "windows");
 pub const WINDOW_BLUR: bool = !cfg!(any(target_os = "linux", target_os = "freebsd"));
 
 /// What a fill keeps of itself once the window is fully see-through. The page
-/// background has no floor — a clear window is the point — but everything drawn
+/// background has no floor - a clear window is the point - but everything drawn
 /// on top of it does, or a hover and a field vanish at the end of the slider. A
 /// surface sits over the background and so reads denser than its own alpha; the
 /// table head replaces the background rather than stacking on it, which is why
@@ -49,7 +49,7 @@ const HEADER_FLOOR: f32 = 0.15;
 /// page is still painted underneath it, which leaves the floor almost inert in
 /// the middle of the slider; a flat cut is the one lever that thins a fill
 /// across the whole of it. The same backing is what makes the cut safe at the top
-/// of the slider — a barely transparent page hides the step on its own. The head
+/// of the slider - a barely transparent page hides the step on its own. The head
 /// is cut harder: it replaces the page rather than sitting on it, and takes the
 /// page back only while it is pinned, so at rest it can be nearly glass.
 const SURFACE_WEIGHT: f32 = 0.68;
@@ -980,8 +980,8 @@ impl Theme {
     /// surface instead of a sheet of glass with opaque slabs floating on it.
     ///
     /// `opacity` is what the window itself keeps. The page background follows it
-    /// all the way down; anything painted *over* that background — a field, a
-    /// card, a hover — keeps a floor, because those read as layers above the
+    /// all the way down; anything painted *over* that background - a field, a
+    /// card, a hover - keeps a floor, because those read as layers above the
     /// glass and have to stay legible once the glass is gone entirely. The
     /// table head is flattened first: it is a tint meant to sit on an opaque
     /// page, and veiling the two layers separately is what makes it read solid.

@@ -26,7 +26,7 @@ const CIPHER: [u8; 16] = [
 const AGENT: &str = concat!(
     "sonora/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/sonorahq/sonora)"
+    " (https://github.com/Sudo-Ivan/sonora)"
 );
 
 pub struct Kugou {

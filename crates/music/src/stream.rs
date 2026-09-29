@@ -3,10 +3,9 @@
 //! the whole file.
 //!
 //! Every provider that streams a file over HTTP uses this. What differs between them is only
-//! what happens to the bytes, which is [`Body`]: Subsonic takes them as they come, Deezer
-//! decrypts each Blowfish stripe as it lands, and Apple Music indexes CENC fragments and hands
-//! each sample to a CDM the moment a reader asks for it. Everything else, the waiting and the
-//! seeking and what a broken connection does, is the same for all three and lives here.
+//! what happens to the bytes, which is [`Body`]: Subsonic takes them as they come, and Deezer
+//! decrypts each Blowfish stripe as it lands. Everything else, the waiting and the seeking and
+//! what a broken connection does, is the same for both and lives here.
 
 use std::io::{self, Read, Seek, SeekFrom};
 use std::ops::Range;

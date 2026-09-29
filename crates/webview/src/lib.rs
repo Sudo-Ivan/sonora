@@ -10,8 +10,8 @@
 //! which is how YouTube's proof-of-origin token is minted; that window is hidden and its script
 //! leaves the answer in a cookie the same poll reads.
 //!
-//! An account provider can finish the sign-in on an interstitial of its own — Google's security
-//! check-up, say — that jumps straight to the return url and skips the hop that hands the account
+//! An account provider can finish the sign-in on an interstitial of its own - Google's security
+//! check-up, say - that jumps straight to the return url and skips the hop that hands the account
 //! to the provider's domain. The page then comes up signed out. When that happens, the sign-in url
 //! is loaded once more: with the account already in, it only runs the hop that was skipped, which
 //! is exactly what the page's own Sign in button would do.
@@ -181,8 +181,8 @@ fn matches(stored: &str, domain: &str) -> bool {
 }
 
 /// Whether the header carries at least one of the proof cookies with a value. The name alone is
-/// not enough: a signed-out Apple Music page already sets an empty `media-user-token`, and
-/// taking that for a session closes the window before the user has typed anything.
+/// not enough: a signed-out page can already set the cookie empty, and taking that for a
+/// session closes the window before the user has typed anything.
 fn proven(header: &str, proof: &[String]) -> bool {
     header
         .split(';')
@@ -232,13 +232,13 @@ mod tests {
         assert!(!proven("", &proof));
     }
 
-    /// Apple Music sets the cookie it delivers the account in before anyone has signed in, with
+    /// A site can set the cookie it delivers the account in before anyone has signed in, with
     /// nothing in it.
     #[test]
     fn an_empty_proof_cookie_is_not_a_session() {
-        let proof = vec!["media-user-token".to_string()];
-        assert!(!proven("geo=PL; media-user-token=", &proof));
-        assert!(!proven("media-user-token=   ", &proof));
-        assert!(proven("media-user-token=AbCd", &proof));
+        let proof = vec!["session-token".to_string()];
+        assert!(!proven("geo=PL; session-token=", &proof));
+        assert!(!proven("session-token=   ", &proof));
+        assert!(proven("session-token=AbCd", &proof));
     }
 }

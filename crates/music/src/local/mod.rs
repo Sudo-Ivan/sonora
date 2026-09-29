@@ -89,10 +89,6 @@ impl MusicProvider for LocalProvider {
         self.index.distrust();
     }
 
-    fn listening_to(&self) -> &'static str {
-        "Local Music"
-    }
-
     fn sign_in_options(&self) -> Vec<SignIn> {
         Vec::new()
     }

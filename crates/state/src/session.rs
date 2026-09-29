@@ -91,7 +91,6 @@ pub struct ProviderInfo {
     pub name: &'static str,
     pub options: Vec<SignIn>,
     pub web_sign_in: bool,
-    pub protected: bool,
     pub stored: bool,
     /// Whether what is stored is an anonymous session rather than an account.
     pub guest: bool,
@@ -249,7 +248,6 @@ impl Session {
                 // Asked in this order because answering `supported` costs a library load on
                 // Linux, and only a provider that signs in with cookies is worth it.
                 web_sign_in: provider.web_sign_in().is_some() && webview::supported(),
-                protected: provider.protected(),
                 stored: provider.stored(),
                 guest: provider.stored_guest(),
                 active: self.active == Some(index),
@@ -263,17 +261,6 @@ impl Session {
 
     pub fn connected(&self) -> impl Iterator<Item = ProviderInfo> + '_ {
         self.providers().filter(|info| info.stored)
-    }
-
-    /// Whether the current provider's tracks need the Widevine module and it has an account.
-    /// A protected provider the user signed into but is not on right now does not count, so
-    /// nothing about the module is looked for or shown until they switch to it.
-    pub fn wants_drm(&self) -> bool {
-        let Some(index) = self.active else {
-            return false;
-        };
-        let provider = &self.providers[index];
-        provider.protected() && provider.stored()
     }
 
     pub fn forget(&mut self, slug: &str, cx: &mut Context<Self>) {
@@ -947,7 +934,7 @@ impl Session {
     }
 }
 
-/// Whether `a` and `b` are the same directory, or one contains the other — either way, scanning
+/// Whether `a` and `b` are the same directory, or one contains the other - either way, scanning
 /// both would double-count the tracks they share.
 fn overlaps(a: &Path, b: &Path) -> bool {
     let a = std::fs::canonicalize(a).unwrap_or_else(|_| a.to_path_buf());

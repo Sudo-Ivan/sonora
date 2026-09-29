@@ -22,7 +22,7 @@ type Gathered =
 /// without asking the engine again.
 #[derive(Clone, Copy, PartialEq)]
 enum Refusal {
-    /// Spotify denied an audio key for the account.
+    /// The provider denied an audio key for the account.
     Keys,
     /// The provider streams only to a signed-in listener.
     SignIn,
@@ -833,7 +833,7 @@ impl Playback {
 
     /// Opens paths handed in from the OS (a file-association launch or hand-off). A single file
     /// plays right away, since picking one is a request to hear it now; several play next,
-    /// right after whatever is already playing, whichever provider it came from — or start right
+    /// right after whatever is already playing, whichever provider it came from - or start right
     /// away if nothing is. Brings the local engine up on the fly if it never started.
     pub fn open_paths(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         if paths.is_empty() {
@@ -2455,20 +2455,24 @@ impl Playback {
         cx.notify();
     }
 
-    /// Records that Spotify denied an audio key and stops for the rest of the session.
+    /// Records that the provider denied an audio key and stops for the rest of the session.
     fn refuse(&mut self, cx: &mut Context<Self>) {
         let first = self.refused.is_none();
         self.refused = Some(Refusal::Keys);
         self.track = None;
         self.blocked_until = None;
-        self.state = PlaybackState::Failed(
-            "spotify denied an audio key for this account; nothing will play in this session"
-                .to_owned(),
-        );
+        let provider = self
+            .session
+            .read(cx)
+            .provider_name()
+            .unwrap_or("the provider");
+        self.state = PlaybackState::Failed(format!(
+            "{provider} denied an audio key for this account; nothing will play in this session"
+        ));
         if first {
             log::error!(
-                "playback: spotify denied an audio key for this account; nothing will play in \
-                 this session"
+                "playback: {provider} denied an audio key for this account; nothing will play \
+                 in this session"
             );
         }
         Toasts::show(Outcome::Failed, "toast-keys-refused", cx);
