@@ -27,7 +27,7 @@ pub mod youtube;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
@@ -605,6 +605,32 @@ pub fn whole<T: Send + 'static>(items: Vec<T>) -> Pages<T> {
     // Room for one page was made above, so this never waits and never fails.
     sender.try_send(Ok(Page { total, items })).ok();
     receiver
+}
+
+/// What `open_url` hands a link to once the app has registered one. Provider code runs on the
+/// tokio runtime with no way to reach the ui, so the crate asks the app to open links for it.
+type UrlOpener = Box<dyn Fn(&str) + Send + Sync>;
+
+static OPEN_URL: OnceLock<UrlOpener> = OnceLock::new();
+
+/// Registers the callback `open_url` routes links through. A second call keeps the first.
+pub fn on_open_url(f: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = OPEN_URL.set(Box::new(f));
+}
+
+/// Opens `url` in the user's browser through the registered callback, or through the platform
+/// opener where the app never registered one. The callback matters under a sandbox, where an
+/// `xdg-open` exec'd here would confine the browser it launches, while the app's own opener can
+/// go through the desktop portal.
+pub fn open_url(url: &str) {
+    match OPEN_URL.get() {
+        Some(open) => open(url),
+        None => {
+            if let Err(error) = open::that_detached(url) {
+                log::warn!("music: cannot open {url}: {error}");
+            }
+        }
+    }
 }
 
 /// A cookie sign-in the app runs in its own browser window. `url` opens first and `landing` scopes

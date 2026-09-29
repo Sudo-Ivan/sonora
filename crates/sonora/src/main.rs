@@ -6,6 +6,8 @@ mod dock;
 mod http;
 mod logging;
 mod memory;
+#[cfg(target_os = "linux")]
+mod sandbox;
 mod single;
 #[cfg(windows)]
 mod thumbbar;
@@ -42,6 +44,10 @@ fn main() {
         .skip(1)
         .filter(|arg| !arg.starts_with('-'))
         .collect();
+    // The domain is installed before the instance listener or the tokio runtime start any
+    // threads: threads spawned after `restrict_self` inherit it, earlier ones never do.
+    #[cfg(target_os = "linux")]
+    sandbox::apply(&args);
     let (sender, mut links) = tokio::sync::mpsc::unbounded_channel::<Vec<String>>();
     match single::claim(&args, sender.clone()) {
         single::Instance::First => {}

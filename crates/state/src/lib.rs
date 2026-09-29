@@ -188,6 +188,22 @@ pub fn init(
     lyrics_providers: Vec<Arc<dyn LyricsProvider>>,
 ) {
     cx.set_global(io.clone());
+
+    // Provider code runs on the tokio runtime where no App handle reaches, so a url it wants in
+    // a browser is posted back here and opened on the main thread. Going through `cx.open_url`
+    // also gives the desktop portal a turn, which still works where an exec'd opener would be
+    // confined by the filesystem sandbox.
+    let (open_url, mut urls) = tokio::sync::mpsc::unbounded_channel::<String>();
+    music::on_open_url(move |url| {
+        open_url.send(url.to_owned()).ok();
+    });
+    cx.spawn(async move |cx| {
+        while let Some(url) = urls.recv().await {
+            cx.update(|cx| cx.open_url(&url));
+        }
+    })
+    .detach();
+
     let settings = cx.new(|cx| {
         let mut settings = AppSettings::load(database.clone());
         settings.watch_files(cx);

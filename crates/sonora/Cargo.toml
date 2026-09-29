@@ -19,7 +19,7 @@ gpui.workspace = true
 gpui_platform.workspace = true
 i18n.workspace = true
 icons.workspace = true
-music = { workspace = true, features = ["widevine"] }
+music.workspace = true
 state.workspace = true
 storage.workspace = true
 input.workspace = true
@@ -28,12 +28,15 @@ ui.workspace = true
 views.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 interprocess.workspace = true
 image.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
+landlock.workspace = true
 libc.workspace = true
 ksni.workspace = true
 zbus.workspace = true

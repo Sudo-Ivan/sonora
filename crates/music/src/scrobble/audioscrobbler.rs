@@ -9,7 +9,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
 use super::{Account, Link, Play, Secret, Service};
-use crate::escape;
+use crate::{escape, open_url};
 
 /// The loopback address the browser hands the token back on.
 const PORT: u16 = 8990;
@@ -84,7 +84,7 @@ impl Service for AudioScrobbler {
         let listener = TcpListener::bind(("127.0.0.1", PORT))
             .await
             .context("cannot listen for the scrobbling callback")?;
-        open::that_in_background(authorize_url(self.authorize, &key));
+        open_url(&authorize_url(self.authorize, &key));
 
         let token = token(listener).await?;
         let form = vec![
