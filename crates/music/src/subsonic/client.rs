@@ -33,6 +33,9 @@ const API_VERSION: &str = "1.16.1";
 const CLIENT_NAME: &str = "sonora";
 /// The OpenSubsonic extension that takes a playback position and state.
 const PLAYBACK_REPORT: &str = "playbackReport";
+/// The OpenSubsonic extension that answers `getSonicSimilarTracks`, a closer radio seed
+/// match than `getSimilarSongs2`.
+const SONIC_SIMILARITY: &str = "sonicSimilarity";
 
 #[derive(Clone)]
 pub struct SubsonicClient {
@@ -43,8 +46,8 @@ pub struct SubsonicClient {
     /// every url afresh, which would give one cover a new url on every conversion and defeat
     /// every image cache between here and the screen.
     covers: String,
-    /// Whether the server takes `reportPlayback`, asked the first time a report goes out.
-    playback_report: Arc<OnceCell<bool>>,
+    /// The OpenSubsonic extensions the server lists, asked the first time a check needs one.
+    extensions: Arc<OnceCell<Vec<String>>>,
 }
 
 /// What the server records about a track that playback wants before the decoder can tell.
@@ -92,27 +95,30 @@ impl SubsonicClient {
             username,
             http,
             covers,
-            playback_report: Arc::default(),
+            extensions: Arc::default(),
         })
     }
 
-    /// Whether the server lists the `playbackReport` extension, asked once per client. A plain
-    /// Subsonic server has no extension list and answers with an error, which counts as no.
-    async fn reports_playback(&self) -> bool {
-        *self
-            .playback_report
+    /// Whether the server lists an OpenSubsonic extension such as `playbackReport`, asked
+    /// once per client. A plain Subsonic server has no extension list and answers with an
+    /// error, which counts as no for every extension.
+    async fn has_extension(&self, name: &str) -> bool {
+        self.extensions
             .get_or_init(|| async {
                 match self.client.get_open_subsonic_extensions().await {
                     Ok(extensions) => extensions
-                        .iter()
-                        .any(|extension| extension.name == PLAYBACK_REPORT),
+                        .into_iter()
+                        .map(|extension| extension.name)
+                        .collect(),
                     Err(error) => {
                         log::info!("subsonic: the server lists no extensions: {error:#}");
-                        false
+                        Vec::new()
                     }
                 }
             })
             .await
+            .iter()
+            .any(|extension| extension == name)
     }
 
     fn cover_url(&self, id: &str, size: i32) -> Option<String> {
@@ -169,13 +175,18 @@ impl SubsonicClient {
                 .song_count
                 .map(|count| count.max(0) as u32)
                 .unwrap_or(tracks as u32),
-            release_date: match year {
-                0 => String::new(),
-                _ => year.to_string(),
-            },
+            release_date: wire::release_date(
+                detail.release_date.as_ref(),
+                detail.original_release_date.as_ref(),
+                year,
+            ),
             label: wire::labels(detail.record_labels.as_deref()),
             copyrights: Vec::new(),
-            added_at: None,
+            added_at: detail
+                .starred
+                .as_deref()
+                .or(detail.created.as_deref())
+                .and_then(wire::iso8601),
         }
     }
 
@@ -185,12 +196,15 @@ impl SubsonicClient {
             .as_deref()
             .and_then(|id| self.cover_url(id, 300));
         wire::playlist(
-            &source.id,
-            &source.name,
-            source.owner.as_deref(),
-            source.public.unwrap_or(false),
-            source.song_count.unwrap_or(0).max(0) as u32,
-            cover,
+            wire::PlaylistSource {
+                id: &source.id,
+                name: &source.name,
+                owner: source.owner.as_deref(),
+                public: source.public.unwrap_or(false),
+                track_count: source.song_count.unwrap_or(0).max(0) as u32,
+                cover,
+                changed: source.changed.as_deref(),
+            },
             &self.username,
         )
     }
@@ -455,7 +469,7 @@ impl MusicApi for SubsonicClient {
     /// A server without the extension only hears that the track is playing, through the
     /// now-playing form of `scrobble`, since it has nowhere to put a position.
     async fn report(&self, track_id: &str, report: Report, position: Duration) -> Result<()> {
-        if !self.reports_playback().await {
+        if !self.has_extension(PLAYBACK_REPORT).await {
             return match report {
                 Report::Playing => self
                     .client
@@ -746,12 +760,15 @@ impl MusicApi for SubsonicClient {
             .as_deref()
             .and_then(|id| self.cover_url(id, 300));
         let mut playlist = wire::playlist(
-            &detail.id,
-            &detail.name,
-            detail.owner.as_deref(),
-            detail.public.unwrap_or(false),
-            detail.song_count.unwrap_or(0).max(0) as u32,
-            cover,
+            wire::PlaylistSource {
+                id: &detail.id,
+                name: &detail.name,
+                owner: detail.owner.as_deref(),
+                public: detail.public.unwrap_or(false),
+                track_count: detail.song_count.unwrap_or(0).max(0) as u32,
+                cover,
+                changed: detail.changed.as_deref(),
+            },
             &self.username,
         );
         if playlist.track_count == 0 {
@@ -776,11 +793,28 @@ impl MusicApi for SubsonicClient {
         Ok(distinct_covers(&tracks, wanted))
     }
 
+    /// The station's next stretch. A server with the `sonicSimilarity` extension matches on
+    /// the audio itself, which sits closer to the seed than `getSimilarSongs2`'s metadata
+    /// similarity, and a server with neither falls back to random songs.
     async fn track_radio(
         &self,
         track_id: &str,
         _from: Option<&str>,
     ) -> Result<(Vec<Track>, Option<String>)> {
+        if self.has_extension(SONIC_SIMILARITY).await
+            && let Ok(matches) = self
+                .client
+                .get_sonic_similar_tracks(track_id, Some(RADIO_COUNT))
+                .await
+        {
+            let songs: Vec<Track> = matches
+                .into_iter()
+                .map(|matched| self.song(matched.entry))
+                .collect();
+            if !songs.is_empty() {
+                return Ok((songs, None));
+            }
+        }
         let similar = self
             .client
             .get_similar_songs2(track_id, Some(RADIO_COUNT))
