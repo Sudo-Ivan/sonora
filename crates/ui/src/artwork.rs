@@ -488,6 +488,23 @@ impl ArtworkCache {
             .filter(|cached| range.contains(&cached.bytes))
             .count()
     }
+
+    /// Condemns everything but the most recently drawn covers, ahead of the budgets that
+    /// `trim` and `sweep` wait on. Memory pressure calls it rather than those so a fat cache
+    /// gives its memory back now instead of on the next idle tick.
+    fn reclaim(&mut self, cx: &mut App) {
+        let before = self.items.len();
+        while self.items.len() > KEEP_ITEMS {
+            let Some((resource, _)) = self.oldest() else {
+                break;
+            };
+            self.condemn(&resource);
+        }
+        if self.items.len() < before {
+            self.condemned_at = Some(Instant::now());
+            cx.refresh_windows();
+        }
+    }
 }
 
 /// Releases condemned covers as their reprieve runs out and sweeps the cache on its own
@@ -634,6 +651,16 @@ pub fn cover_palette(url: &str, cx: &App) -> Option<CoverPalette> {
     let resource = resource(url.to_owned());
 
     installed.0.read(cx).tints.get(&resource).copied()
+}
+
+/// Drops decoded covers down to the small resident set ahead of schedule, for a caller that
+/// watches memory pressure. Covers on screen are reclaimed on the redraw this triggers, the
+/// rest are reaped once their reprieve runs out.
+pub fn artwork_flush(cx: &mut App) {
+    let Some(cache) = cx.try_global::<Installed>().map(|i| i.0.clone()) else {
+        return;
+    };
+    cache.update(cx, |cache, cx| cache.reclaim(cx));
 }
 
 pub fn artwork_usage(cx: &App) -> Option<(usize, usize)> {

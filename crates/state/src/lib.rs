@@ -82,8 +82,9 @@ impl Global for Io {}
 /// and costs a stack and an allocator arena each.
 const WORKERS: usize = 4;
 /// The ceiling on blocking threads, which is where the sqlite reads and the tag writes go. The
-/// default is 512, far past anything Sonora queues at once.
-const BLOCKING: usize = 16;
+/// default is 512, far past anything Sonora queues at once, and eight is still several times
+/// what a busy moment asks for.
+const BLOCKING: usize = 8;
 
 impl Io {
     pub fn new() -> Result<Self> {

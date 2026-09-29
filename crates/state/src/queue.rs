@@ -1,4 +1,5 @@
 use std::collections::{HashSet, VecDeque};
+use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{Context, Entity};
@@ -114,9 +115,9 @@ fn hydrate(stub: Stub) -> Track {
 /// user queued by hand, and the count written out only counts those that survive as stubs.
 fn record<'a>(
     provider: &str,
-    past: &[Track],
+    past: &[Rc<Track>],
     current: Option<&Track>,
-    upcoming: impl Iterator<Item = &'a Track>,
+    upcoming: impl Iterator<Item = &'a Rc<Track>>,
     manual: usize,
 ) -> Resume {
     let mut kept_manual = 0;
@@ -136,7 +137,7 @@ fn record<'a>(
         current: current.and_then(stub),
         past: past[past.len().saturating_sub(KEPT_PAST)..]
             .iter()
-            .filter_map(stub)
+            .filter_map(|rc| stub(rc))
             .collect(),
         upcoming,
         manual: kept_manual,
@@ -168,12 +169,12 @@ fn sift<T>(
     before != tally(past, current, upcoming, source)
 }
 
-fn scramble(upcoming: &mut VecDeque<Track>, source: &[Track], current: Option<&Track>) {
+fn scramble(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Option<&Track>) {
     let known: HashSet<&str> = source
         .iter()
         .filter_map(|track| track.id.as_deref())
         .collect();
-    let mut tracks: Vec<Track> = upcoming
+    let mut tracks: Vec<Rc<Track>> = upcoming
         .drain(..)
         .filter(|track| !track.id.as_deref().is_some_and(|id| known.contains(id)))
         .collect();
@@ -196,12 +197,12 @@ fn scramble(upcoming: &mut VecDeque<Track>, source: &[Track], current: Option<&T
     *upcoming = tracks.into();
 }
 
-fn restore(upcoming: &mut VecDeque<Track>, source: &[Track], current: Option<&Track>) {
+fn restore(upcoming: &mut VecDeque<Rc<Track>>, source: &[Rc<Track>], current: Option<&Track>) {
     let known: HashSet<&str> = source
         .iter()
         .filter_map(|track| track.id.as_deref())
         .collect();
-    let extra: Vec<Track> = upcoming
+    let extra: Vec<Rc<Track>> = upcoming
         .drain(..)
         .filter(|track| !track.id.as_deref().is_some_and(|id| known.contains(id)))
         .collect();
@@ -288,10 +289,10 @@ pub(crate) fn gap_target(from: usize, gap: usize, len: usize) -> usize {
 /// `similar` tracks are radio suggestions. Add to queue and Play next land in the first run, so
 /// they play before the album or playlist continues.
 pub struct Queue {
-    past: Vec<Track>,
-    current: Option<Track>,
-    upcoming: VecDeque<Track>,
-    source: Vec<Track>,
+    past: Vec<Rc<Track>>,
+    current: Option<Rc<Track>>,
+    upcoming: VecDeque<Rc<Track>>,
+    source: Vec<Rc<Track>>,
     manual: usize,
     similar: usize,
     shuffle: bool,
@@ -340,10 +341,10 @@ impl Queue {
         self.settings
             .update(cx, |settings, cx| settings.set_shuffle(on, cx));
         let mut suggested = self.upcoming.split_off(self.queued());
-        let mut manual: VecDeque<Track> = self.upcoming.drain(..self.manual).collect();
+        let mut manual: VecDeque<Rc<Track>> = self.upcoming.drain(..self.manual).collect();
         match on {
-            true => scramble(&mut self.upcoming, &self.source, self.current.as_ref()),
-            false => restore(&mut self.upcoming, &self.source, self.current.as_ref()),
+            true => scramble(&mut self.upcoming, &self.source, self.current.as_deref()),
+            false => restore(&mut self.upcoming, &self.source, self.current.as_deref()),
         }
         manual.append(&mut self.upcoming);
         self.upcoming = manual;
@@ -376,7 +377,7 @@ impl Queue {
                 record(
                     slug,
                     &self.past,
-                    self.current.as_ref(),
+                    self.current.as_deref(),
                     self.upcoming.range(..self.queued()),
                     self.manual,
                 )
@@ -386,9 +387,17 @@ impl Queue {
     }
 
     pub(crate) fn revive(&mut self, resume: Resume, cx: &mut Context<Self>) -> Option<Track> {
-        self.past = resume.past.into_iter().map(hydrate).collect();
-        self.current = resume.current.map(hydrate);
-        self.upcoming = resume.upcoming.into_iter().map(hydrate).collect();
+        self.past = resume
+            .past
+            .into_iter()
+            .map(|s| Rc::new(hydrate(s)))
+            .collect();
+        self.current = resume.current.map(|s| Rc::new(hydrate(s)));
+        self.upcoming = resume
+            .upcoming
+            .into_iter()
+            .map(|s| Rc::new(hydrate(s)))
+            .collect();
         self.manual = resume.manual.min(self.upcoming.len());
         self.similar = 0;
         self.source = self
@@ -399,7 +408,7 @@ impl Queue {
             .cloned()
             .collect();
         self.changed(cx);
-        self.current.clone()
+        self.current.as_deref().cloned()
     }
 
     fn purge(&mut self, cx: &mut Context<Self>) {
@@ -416,7 +425,7 @@ impl Queue {
             &mut self.current,
             &mut self.upcoming,
             &mut self.source,
-            local,
+            |track| local(track),
         );
         if suggested || sifted {
             self.changed(cx);
@@ -428,11 +437,11 @@ impl Queue {
     }
 
     pub fn past(&self) -> impl ExactSizeIterator<Item = &Track> {
-        self.past.iter()
+        self.past.iter().map(AsRef::as_ref)
     }
 
     pub fn current(&self) -> Option<&Track> {
-        self.current.as_ref()
+        self.current.as_deref()
     }
 
     fn queued(&self) -> usize {
@@ -441,22 +450,22 @@ impl Queue {
 
     /// Everything queued to play, hand-queued tracks first, without the suggestions.
     pub fn upcoming(&self) -> impl ExactSizeIterator<Item = &Track> {
-        self.upcoming.range(..self.queued())
+        self.upcoming.range(..self.queued()).map(AsRef::as_ref)
     }
 
     /// The tracks the user queued by hand. They open `upcoming`.
     pub fn manual(&self) -> impl ExactSizeIterator<Item = &Track> {
-        self.upcoming.range(..self.manual)
+        self.upcoming.range(..self.manual).map(AsRef::as_ref)
     }
 
     pub fn similar(&self) -> impl ExactSizeIterator<Item = &Track> {
-        self.upcoming.range(self.queued()..)
+        self.upcoming.range(self.queued()..).map(AsRef::as_ref)
     }
 
     pub fn suggest(&mut self, tracks: Vec<Track>, cx: &mut Context<Self>) {
         self.upcoming.truncate(self.queued());
         self.similar = tracks.len();
-        self.upcoming.extend(tracks);
+        self.upcoming.extend(tracks.into_iter().map(Rc::new));
         self.changed(cx);
     }
 
@@ -467,7 +476,7 @@ impl Queue {
             return;
         }
         self.similar += tracks.len();
-        self.upcoming.extend(tracks);
+        self.upcoming.extend(tracks.into_iter().map(Rc::new));
         self.changed(cx);
     }
 
@@ -494,7 +503,7 @@ impl Queue {
             return false;
         }
         let matches = |track: &Track| track.id.as_ref().is_some_and(|id| ids.contains(id));
-        let current_removed = self.current.as_ref().is_some_and(matches);
+        let current_removed = self.current.as_ref().is_some_and(|rc| matches(rc));
         let before = self.past.len() + usize::from(self.current.is_some()) + self.upcoming.len();
         self.past.retain(|track| !matches(track));
         if current_removed {
@@ -576,12 +585,24 @@ impl Queue {
             .and_then(|current| self.source.iter().position(|track| track == current))
             .unwrap_or_default();
         let source = self.source.clone();
-        self.start(source, index, cx)
+        self.seed(source, index, cx)
     }
 
     pub fn start(
         &mut self,
         tracks: Vec<Track>,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) -> Option<Track> {
+        self.seed(tracks.into_iter().map(Rc::new).collect(), index, cx)
+    }
+
+    /// What start and rewind share. Tracks live in Rc so source and upcoming keep the same
+    /// copy of a track instead of every played or queued track existing twice in memory,
+    /// which is roughly half the queue's footprint on a long session.
+    fn seed(
+        &mut self,
+        tracks: Vec<Rc<Track>>,
         index: usize,
         cx: &mut Context<Self>,
     ) -> Option<Track> {
@@ -596,12 +617,12 @@ impl Queue {
         self.similar = 0;
         self.current = past.pop();
         if self.shuffle {
-            scramble(&mut self.upcoming, &self.source, self.current.as_ref());
+            scramble(&mut self.upcoming, &self.source, self.current.as_deref());
             past.clear();
         }
         self.past = past;
         self.changed(cx);
-        self.current.clone()
+        self.current.as_deref().cloned()
     }
 
     /// Queues a track after the ones already queued by hand, ahead of the rest of the source.
@@ -625,15 +646,16 @@ impl Queue {
     ) {
         let at = self.queued();
         for (offset, track) in tracks.into_iter().enumerate() {
-            self.upcoming.insert(at + offset, track);
+            self.upcoming.insert(at + offset, Rc::new(track));
         }
         self.changed(cx);
     }
 
     pub(crate) fn extend_context(&mut self, tracks: Vec<Track>, cx: &mut Context<Self>) {
         let at = self.queued();
-        self.source.extend(tracks.iter().cloned());
-        for (offset, track) in tracks.into_iter().enumerate() {
+        let shared: Vec<Rc<Track>> = tracks.into_iter().map(Rc::new).collect();
+        self.source.extend(shared.iter().cloned());
+        for (offset, track) in shared.into_iter().enumerate() {
             self.upcoming.insert(at + offset, track);
         }
         self.changed(cx);
@@ -650,7 +672,7 @@ impl Queue {
         let at = gap.min(self.queued());
         let mut count = 0;
         for (offset, track) in tracks.into_iter().enumerate() {
-            self.upcoming.insert(at + offset, track);
+            self.upcoming.insert(at + offset, Rc::new(track));
             count += 1;
         }
         if at <= self.manual {
@@ -665,7 +687,7 @@ impl Queue {
 
     /// Queues tracks to play right after the current one, ahead of anything queued before.
     pub fn prepend_all(&mut self, tracks: impl IntoIterator<Item = Track>, cx: &mut Context<Self>) {
-        let mut upcoming = tracks.into_iter().collect::<VecDeque<_>>();
+        let mut upcoming = tracks.into_iter().map(Rc::new).collect::<VecDeque<_>>();
         self.manual += upcoming.len();
         upcoming.append(&mut self.upcoming);
         self.upcoming = upcoming;
@@ -714,7 +736,7 @@ impl Queue {
             self.past.push(played);
         }
         self.changed(cx);
-        self.current.clone()
+        self.current.as_deref().cloned()
     }
 
     pub fn rewind(&mut self, cx: &mut Context<Self>) -> Option<Track> {
@@ -723,7 +745,7 @@ impl Queue {
         let mut tracks = std::mem::take(&mut self.past);
         tracks.extend(self.current.take());
         tracks.extend(self.upcoming.drain(..));
-        self.start(tracks, 0, cx)
+        self.seed(tracks, 0, cx)
     }
 
     pub fn previous(&mut self, cx: &mut Context<Self>) -> Option<Track> {
@@ -740,7 +762,7 @@ impl Queue {
         }
         self.manual += self.upcoming.len() - before;
         self.changed(cx);
-        self.current.clone()
+        self.current.as_deref().cloned()
     }
 
     /// Jumps to an upcoming track. Hand-queued tracks it skips go to the history, but picking a
@@ -761,7 +783,7 @@ impl Queue {
             }
         }
         self.changed(cx);
-        self.current.clone()
+        self.current.as_deref().cloned()
     }
 
     pub fn play_similar(&mut self, index: usize, cx: &mut Context<Self>) -> Option<Track> {
@@ -780,7 +802,7 @@ impl Queue {
         self.manual = 0;
         self.similar -= index + 1;
         self.changed(cx);
-        self.current.clone()
+        self.current.as_deref().cloned()
     }
 }
 
@@ -820,15 +842,17 @@ mod tests {
         }
     }
 
-    fn ids(tracks: &VecDeque<Track>) -> Vec<String> {
+    fn ids(tracks: &VecDeque<std::rc::Rc<Track>>) -> Vec<String> {
         tracks
             .iter()
             .map(|track| track.name.clone())
             .collect::<Vec<_>>()
     }
 
-    fn listing(count: usize) -> Vec<Track> {
-        (0..count).map(|index| track(&index.to_string())).collect()
+    fn listing(count: usize) -> Vec<std::rc::Rc<Track>> {
+        (0..count)
+            .map(|index| std::rc::Rc::new(track(&index.to_string())))
+            .collect()
     }
 
     #[test]
@@ -848,7 +872,7 @@ mod tests {
     #[test]
     fn restoring_returns_the_source_order() {
         let source = listing(20);
-        let mut upcoming: VecDeque<Track> = source.iter().cloned().collect();
+        let mut upcoming: VecDeque<std::rc::Rc<Track>> = source.iter().cloned().collect();
 
         scramble(&mut upcoming, &source, None);
         restore(&mut upcoming, &source, None);
@@ -858,12 +882,16 @@ mod tests {
 
     #[test]
     fn restoring_puts_unknown_tracks_last() {
-        let source = vec![track("a"), track("b"), track("c")];
+        let source = vec![
+            std::rc::Rc::new(track("a")),
+            std::rc::Rc::new(track("b")),
+            std::rc::Rc::new(track("c")),
+        ];
         let mut upcoming = VecDeque::from(vec![
-            track("queued-one"),
-            track("c"),
-            track("queued-two"),
-            track("a"),
+            std::rc::Rc::new(track("queued-one")),
+            std::rc::Rc::new(track("c")),
+            std::rc::Rc::new(track("queued-two")),
+            std::rc::Rc::new(track("a")),
         ]);
 
         restore(&mut upcoming, &source, None);
@@ -873,8 +901,16 @@ mod tests {
 
     #[test]
     fn restoring_keeps_both_copies_of_a_repeated_track() {
-        let source = vec![track("a"), track("b"), track("a")];
-        let mut upcoming = VecDeque::from(vec![track("a"), track("a"), track("b")]);
+        let source = vec![
+            std::rc::Rc::new(track("a")),
+            std::rc::Rc::new(track("b")),
+            std::rc::Rc::new(track("a")),
+        ];
+        let mut upcoming = VecDeque::from(vec![
+            std::rc::Rc::new(track("a")),
+            std::rc::Rc::new(track("a")),
+            std::rc::Rc::new(track("b")),
+        ]);
 
         restore(&mut upcoming, &source, None);
 
@@ -884,7 +920,7 @@ mod tests {
     #[test]
     fn restoring_continues_after_the_current_track() {
         let source = listing(12);
-        let mut upcoming: VecDeque<Track> = source.iter().cloned().collect();
+        let mut upcoming: VecDeque<std::rc::Rc<Track>> = source.iter().cloned().collect();
 
         scramble(&mut upcoming, &source, Some(&source[8]));
         restore(&mut upcoming, &source, Some(&source[8]));
@@ -944,6 +980,104 @@ mod tests {
         assert_eq!(past, [1, 2]);
         assert_eq!(current, Some(3));
         assert_eq!(upcoming, [4, 5]);
+    }
+
+    /// A seeded scale check rather than an assertion: builds a 12k-track source the way a
+    /// whole-library play leaves the queue, then times the operations every advance and
+    /// shuffle runs. Run it as cargo test -p state queue_scales -- --ignored --nocapture.
+    #[test]
+    #[ignore = "measures timings rather than asserting"]
+    fn queue_scales() {
+        use std::rc::Rc;
+        use std::time::Instant;
+
+        let size = |track: &Track| {
+            std::mem::size_of::<Track>()
+                + track.id.as_deref().map_or(0, str::len)
+                + track.name.len()
+                + track.artists.len()
+                + track
+                    .artist_refs
+                    .iter()
+                    .map(|a| a.name.len() + a.id.as_deref().map_or(0, str::len))
+                    .sum::<usize>()
+                + track.album.len()
+                + track.album_id.as_deref().map_or(0, str::len)
+                + track.cover.as_deref().map_or(0, str::len)
+                + track.tags.iter().map(|t| t.len()).sum::<usize>()
+        };
+        let rss = || {
+            std::fs::read_to_string("/proc/self/status")
+                .ok()
+                .and_then(|status| {
+                    status
+                        .lines()
+                        .find(|line| line.starts_with("VmRSS"))
+                        .map(|line| line.to_owned())
+                })
+        };
+
+        let tracks: Vec<Rc<Track>> = (0..12_000)
+            .map(|index| {
+                let mut seeded = track(&format!("id-{index}"));
+                seeded.artists = format!("Artist {}", index % 700);
+                seeded.artist_refs = vec![ArtistRef {
+                    name: format!("Artist {}", index % 700),
+                    id: Some(format!("a{}", index % 700)),
+                }];
+                seeded.album = format!("Album {}", index % 1200);
+                seeded.album_id = Some(format!("al{}", index % 1200));
+                seeded.cover = Some(format!("https://covers.example/{index}.jpg"));
+                seeded.tags = vec!["rock".to_owned()];
+                Rc::new(seeded)
+            })
+            .collect();
+        let per_track: usize = tracks.iter().map(|rc| size(rc)).sum::<usize>() / tracks.len();
+        println!("~{per_track} B per track, {} tracks", tracks.len());
+        println!("rss before: {}", rss().unwrap_or_default());
+
+        let mut past = Vec::new();
+        let mut current = None;
+        let mut upcoming: VecDeque<_> = tracks.iter().cloned().collect();
+        let source = tracks;
+        println!("rss with queue+source: {}", rss().unwrap_or_default());
+
+        let clock = Instant::now();
+        for _ in 0..2000 {
+            let next = upcoming.pop_front().expect("queue ran dry");
+            if let Some(played) = current.replace(next) {
+                past.push(played);
+            }
+        }
+        println!("2000 advances: {:?}", clock.elapsed());
+
+        let clock = Instant::now();
+        let record = record("deezer", &past, current.as_deref(), upcoming.iter(), 40);
+        let json = serde_json::to_string(&record).expect("resume serializes");
+        println!(
+            "record+serialize: {:?} ({} bytes)",
+            clock.elapsed(),
+            json.len()
+        );
+
+        let clock = Instant::now();
+        let mut shuffled: VecDeque<_> = upcoming.iter().cloned().collect();
+        scramble(&mut shuffled, &source, current.as_deref());
+        println!("scramble of {}: {:?}", shuffled.len(), clock.elapsed());
+
+        let clock = Instant::now();
+        let ids: std::collections::HashSet<String> = past
+            .iter()
+            .chain(current.as_ref())
+            .chain(upcoming.iter())
+            .filter_map(|track| track.id.clone())
+            .collect();
+        println!("ids() over {}: {:?}", ids.len(), clock.elapsed());
+
+        let clock = Instant::now();
+        restore(&mut shuffled, &source, current.as_deref());
+        println!("restore: {:?}", clock.elapsed());
+        println!("rss after: {}", rss().unwrap_or_default());
     }
 
     #[test]

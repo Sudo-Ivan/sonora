@@ -5,17 +5,47 @@ use state::Sonora;
 
 const INTERVAL: Duration = Duration::from_secs(30);
 
+/// Resident bytes above which a tick acts rather than trims: the artwork cache is squeezed
+/// to its small resident set and the heap handed back to the allocator. Well past a healthy
+/// session's working set, so the flush only runs when something is genuinely bloated.
+const PRESSURE: usize = 768 * 1024 * 1024;
+
 pub fn watch(cx: &mut App) {
     cx.spawn(async move |cx| {
+        let mut fat = false;
         loop {
             cx.background_executor().timer(INTERVAL).await;
-            if log::log_enabled!(log::Level::Debug) {
-                let probed = cx
-                    .background_executor()
-                    .spawn(async { (footprint().unwrap_or_default(), resident()) })
-                    .await;
-                cx.update(|cx| report(probed, cx));
-            }
+            let probed = cx
+                .background_executor()
+                .spawn(async {
+                    let rss = resident();
+                    // A smaps read is a megabyte of text, so the cheap status read decides
+                    // whether a breakdown is worth it: for the debug report, or under
+                    // pressure when the warn says where the memory sits.
+                    match rss.is_some_and(|rss| rss > PRESSURE)
+                        || log::log_enabled!(log::Level::Debug)
+                    {
+                        true => (footprint().unwrap_or_default(), rss),
+                        false => (Footprint::default(), rss),
+                    }
+                })
+                .await;
+            cx.update(|cx| {
+                if let Some(rss) = probed.1 {
+                    if rss > PRESSURE {
+                        if !fat {
+                            log::warn!("memory: rss {} is over budget", mib(rss));
+                        }
+                        fat = true;
+                        ui::artwork_flush(cx);
+                    } else {
+                        fat = false;
+                    }
+                }
+                if log::log_enabled!(log::Level::Debug) {
+                    report(probed, cx);
+                }
+            });
             cx.background_executor().spawn(async { release() }).detach();
         }
     })
