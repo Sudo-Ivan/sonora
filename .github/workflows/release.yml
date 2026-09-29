@@ -495,9 +495,9 @@ jobs:
   # Build flatpak, see: https://github.com/flatpak/flatpak-github-actions
   flatpak:
     name: "Flatpak (${{ matrix.variant.arch }})"
-    # Publishing needs the signing key and Pages; a fork without them configured skips the
-    # whole flatpak leg rather than failing the release.
-    if: vars.FLATPAK_REPO == 'true'
+    # The bundle builds on every tag and rides the release like every other artefact; only
+    # the repository publishing leg further down keeps the FLATPAK_REPO gate.
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -550,7 +550,7 @@ jobs:
           bundle: sonora-${{ steps.meta.outputs.version }}-${{ matrix.variant.arch }}.flatpak
           arch: ${{ matrix.variant.arch }}
           upload-artifact: true
-          artifact-name: flatpak-${{ matrix.variant.arch }}
+          artifact-name: release-flatpak-${{ matrix.variant.arch }}
 
   flatpak-repo:
     name: publish the flatpak repository
@@ -652,8 +652,14 @@ jobs:
 
   draft:
     name: draft the release
-    needs: [build, bundle, appimage]
-    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, bundle, appimage, flatpak]
+    # The flatpak leg is allowed to fail without taking the release down: only the binary
+    # matrix, the macOS bundle and the AppImages gate the draft. A failed flatpak build just
+    # leaves the .flatpak files out of the release.
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/') &&
+      needs.build.result == 'success' && needs.bundle.result == 'success' &&
+      needs.appimage.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: release
