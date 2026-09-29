@@ -65,9 +65,19 @@ not listed below is inherited from upstream.
 
 ## Continuous integration
 
-- `.github/workflows/ci.yml` runs rustfmt, clippy and the test suite on push and
-  pull request, lints the macOS and Windows cfgs, and builds every release
-  target on `main` pushes.
+- `.github/workflows/ci.yml` is the gate: rustfmt, clippy -D warnings and the
+  full workspace test suite on push and pull request, clippy on the macOS and
+  Windows targets on pull requests, and a release build of every target on
+  pushes to `master`. Each built artefact runs `sonora --version` as a smoke
+  test before it is staged.
+- Benchmarks gate the merge too: the ignored bench tests print machine-readable
+  BENCH lines, and `scripts/bench-check.py` fails the `bench` job when a metric
+  lands over its ceiling in `bench/baselines.json`. Regenerate ceilings with
+  `--write` when a perf change is intentional.
+- The `ci` job is the one name to require in branch protection: it needs every
+  other job and fails unless each succeeded or was skipped, so adding a job
+  later cannot silently leave a hole in the rule. Every job carries a
+  `timeout-minutes` bound.
 - `.github/workflows/release.yml` builds all six release targets, the universal
   macOS disk image and both AppImages, attaches Sigstore build provenance to
   every artefact, and publishes a `v*` tag as a GitHub release through
