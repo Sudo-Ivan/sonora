@@ -1,0 +1,12 @@
+# rustc dep-info and other build output under target/ is not shipped source.
+SEC-090 target/**
+
+# The [patch.crates-io] table pins rodio to a specific rev on purpose.
+CRG-001 Cargo.toml
+
+# A licence install line full of repeated io.github app ids is not a credential.
+SEC-090 flatpak/flatpak-builder.yaml
+
+# The GITHUB_OUTPUT writes only carry tag names, matrix constants and a gpg
+# fingerprint, none of which can smuggle a newline.
+WFA-003 .github/workflows/release.yml

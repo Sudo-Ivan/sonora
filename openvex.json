@@ -1,0 +1,46 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/Sudo-Ivan/sonora/blob/master/openvex.json",
+  "author": "Sudo-Ivan",
+  "role": "Document Creator",
+  "timestamp": "2026-10-01T00:00:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": { "name": "RUSTSEC-2024-0436" },
+      "products": [
+        {
+          "@id": "pkg:github/Sudo-Ivan/sonora",
+          "subcomponents": [{ "@id": "pkg:cargo/paste@1.0.15" }]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "status_notes": "The advisory marks paste unmaintained and declares no vulnerability. It is a compile-time proc macro reached through lofty, pulp, rav1e and metal; nothing it expands runs at runtime beyond what those crates already do."
+    },
+    {
+      "vulnerability": { "name": "RUSTSEC-2026-0194" },
+      "products": [
+        {
+          "@id": "pkg:github/Sudo-Ivan/sonora",
+          "subcomponents": [{ "@id": "pkg:cargo/quick-xml@0.30.0" }]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "The vulnerable path is BytesStart::attributes() and NsReader. The only 0.30.0 consumer is xcb, which uses it as a build dependency to parse the XML protocol files shipped inside that crate at compile time. Nothing attacker-controlled reaches it. The runtime copy (0.41.0 via wayland-scanner) is already patched."
+    },
+    {
+      "vulnerability": { "name": "RUSTSEC-2026-0195" },
+      "products": [
+        {
+          "@id": "pkg:github/Sudo-Ivan/sonora",
+          "subcomponents": [{ "@id": "pkg:cargo/quick-xml@0.30.0" }]
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "status_notes": "Requires NsReader, which nothing in the tree instantiates: xcb's build-time reader over bundled XML is the only 0.30.0 consumer and wayland-scanner uses the patched 0.41.0."
+    }
+  ]
+}

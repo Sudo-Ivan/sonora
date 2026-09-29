@@ -5,6 +5,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# Least privilege by default; a job that needs more declares it itself.
+permissions: {}
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: true
@@ -13,13 +16,16 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_PROFILE_RELEASE_STRIP: symbols
   RUST_BACKTRACE: 1
-  RUSTC_WRAPPER: sccache
-  SCCACHE_GHA_ENABLED: "true"
 
+# No caches in this workflow on purpose: a poisoned cache on a tag build would ship to users.
 jobs:
   build:
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # check out the tree
+      id-token: write # sign artefacts through Sigstore
+      attestations: write # publish the attestation
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +47,9 @@ jobs:
             arch: arm64
             setup: Sonora-Setup-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: name the artifact
         id: meta
@@ -64,22 +72,19 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev libdbus-1-dev
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # rust-toolchain.toml names the toolchain and its components; rustup installs what it asks.
+      - name: toolchain
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup show
+          rustup target add "$TARGET"
 
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-          cache-targets: false
-          cache-on-failure: true
       - name: build
-        run: cargo build --release --locked --package sonora --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --package sonora --target "$TARGET"
 
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
       - name: stage the executable
         shell: bash
         env:
@@ -131,7 +136,11 @@ jobs:
           $env:SONORA_DIST = (Resolve-Path "dist").Path
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "scripts/windows/sonora.iss"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: "${{ runner.os == 'macOS' && format('darwin-{0}', matrix.target) || format('release-{0}', matrix.target) }}"
           path: dist/*
@@ -141,8 +150,14 @@ jobs:
     name: macos app bundle
     needs: build
     runs-on: macos-15
+    permissions:
+      contents: read # check out the tree
+      id-token: write # sign artefacts through Sigstore
+      attestations: write # publish the attestation
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: name the artifact
         id: meta
@@ -162,7 +177,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "number=$number" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: darwin-*
           path: darwin
@@ -250,7 +265,11 @@ jobs:
             -format UDZO \
             "dist/sonora-$VERSION-macos.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-macos
           path: dist/*
@@ -271,6 +290,10 @@ jobs:
             runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.variant.runner }}
+    permissions:
+      contents: read # check out the tree
+      id-token: write # sign artefacts through Sigstore
+      attestations: write # publish the attestation
 
     env:
       # The runner images carry no libfuse2, so every AppImage tool has to unpack itself.
@@ -278,7 +301,9 @@ jobs:
       ARCH: ${{ matrix.variant.arch }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: name the artifact
         id: meta
@@ -311,7 +336,7 @@ jobs:
             echo "update=$update"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-${{ matrix.variant.target }}
           path: staged
@@ -435,7 +460,11 @@ jobs:
           ldd squashfs-root/usr/bin/sonora
           rm -rf squashfs-root
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-appimage-${{ matrix.variant.arch }}
           path: dist/*
@@ -444,6 +473,9 @@ jobs:
   # Build flatpak, see: https://github.com/flatpak/flatpak-github-actions
   flatpak:
     name: "Flatpak (${{ matrix.variant.arch }})"
+    # Publishing needs the signing key and Pages; a fork without them configured skips the
+    # whole flatpak leg rather than failing the release.
+    if: vars.FLATPAK_REPO == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -454,16 +486,20 @@ jobs:
             runner: ubuntu-22.04-arm
 
     runs-on: ${{ matrix.variant.runner }}
+    permissions:
+      contents: read # check out the tree
 
     container:
       # Use an image generated by Flathub to avoid re-installing the SDKs for every build,
       # see: https://github.com/flathub-infra/actions-images
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-25.08@sha256:c91a88269eee8fcdd73ecf43064232fbebe27411f926f63f38bdf70c51f2ceae
       options: --privileged
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: name the artifact
         id: meta
@@ -485,7 +521,7 @@ jobs:
           ./flatpak/generate-sources.sh
 
       - name: Build Flatpak Bundle
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        uses: flatpak/flatpak-github-actions/flatpak-builder@10a3c29f0162516f0f68006be14c92f34bd4fa6c # v6.5
         with:
           manifest-path: flatpak/flatpak-builder.yaml
           bundle: sonora-${{ steps.meta.outputs.version }}-${{ matrix.variant.arch }}.flatpak
@@ -494,15 +530,22 @@ jobs:
           artifact-name: flatpak-${{ matrix.variant.arch }}
 
   flatpak-repo:
+    name: publish the flatpak repository
     needs: flatpak
-    if: startsWith(github.ref, 'refs/tags/')
+    if: vars.FLATPAK_REPO == 'true' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    environment: flatpak-repo
     permissions:
-      contents: write
+      contents: write # force-push the flatpak-repo branch
+    env:
+      # A fixed home under the job's temp dir, so no GITHUB_ENV write is needed.
+      GNUPGHOME: ${{ runner.temp }}/gnupg
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: flatpak-*
           path: bundles
@@ -519,17 +562,18 @@ jobs:
           KEY: ${{ secrets.FLATPAK_GPG_KEY }}
         run: |
           set -euo pipefail
-          GNUPGHOME="$(mktemp -d)"
-          export GNUPGHOME
+          mkdir -p "$GNUPGHOME"
+          chmod 700 "$GNUPGHOME"
           echo "$KEY" | gpg --batch --import
           fingerprint="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')"
-          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
 
       - name: fetch the published repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch flatpak-repo "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" site \
+          gh repo clone "$GITHUB_REPOSITORY" site -- --depth 1 --branch flatpak-repo \
             || mkdir site
           rm -rf site/.git
 
@@ -562,39 +606,39 @@ jobs:
       - name: export the bundles
         env:
           VERSION: ${{ github.ref_name }}
-        run: ./flatpak/export-bundles.sh site/repo "$VERSION" dist
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-flatpak
-          path: dist/*
-          if-no-files-found: error
+        run: ./flatpak/export-bundles.sh site/repo "$VERSION" site
 
       - name: push the repo
         env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           cd site
-          git init -q -b flatpak-repo
+          git init -q
           git add -A
-          git \
-            -c user.name="github-actions[bot]" \
+          git -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -q -m "chore(flatpak): publish $VERSION"
-          git push --force "https://x-access-token:$TOKEN@github.com/$GITHUB_REPOSITORY" flatpak-repo
+          # The credential rides an http header, never the remote URL, so a remote listing
+          # or error message cannot carry it.
+          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" \
+            push --force "https://github.com/$GITHUB_REPOSITORY" HEAD:flatpak-repo
 
   release:
-    needs: [build, bundle, appimage, flatpak, flatpak-repo]
+    name: publish the release
+    needs: [build, bundle, appimage]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    environment: release
     permissions:
-      contents: write
+      contents: write # create the release and upload its assets
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-*
           path: dist
@@ -628,19 +672,22 @@ jobs:
           set -euo pipefail
           gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$TAG" --jq .body > notes.md
-          printf '\n[Code signing policy](https://github.com/%s#code-signing)\n' "$GITHUB_REPOSITORY" >> notes.md
+          printf '\n[Provenance](%s#provenance)\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" >> notes.md
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          body_path: notes.md
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          fail_on_unmatched_files: true
+      # The release is created as a draft with every asset already on it, then published.
+      # Once published, immutable releases lock the tag and its assets for good.
+      - name: create the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          args=(--draft --notes-file notes.md --title "$TAG")
+          case "$TAG" in *-*) args+=(--prerelease);; esac
+          gh release create "$TAG" "${args[@]}" dist/*
 
-  announce:
-    needs: release
-    if: startsWith(github.ref, 'refs/tags/')
-    uses: ./.github/workflows/announce.yml
-    secrets: inherit
-    with:
-      tag: ${{ github.ref_name }}
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --draft=false

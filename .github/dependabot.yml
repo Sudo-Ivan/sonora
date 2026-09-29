@@ -1,0 +1,20 @@
+version: 2
+
+# Pinned actions still drift: Dependabot bumps the SHA and the version comment together.
+# The cooldown keeps a compromised release from landing the day it ships.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7

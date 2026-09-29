@@ -2,9 +2,12 @@ name: ci
 
 on:
   push:
-    branches: [dev]
+    branches: [master]
   pull_request:
   workflow_dispatch:
+
+# Least privilege by default; a job that needs more declares it itself.
+permissions: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -21,8 +24,12 @@ jobs:
   check:
     name: fmt, clippy and tests
     runs-on: ubuntu-22.04
+    permissions:
+      contents: read # check out the tree
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: system dependencies
         run: |
@@ -34,12 +41,12 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev libdbus-1-dev
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # rust-toolchain.toml names the toolchain and its components; rustup installs what it asks.
+      - name: toolchain
+        run: rustup show
 
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           key: ci-check
           cache-on-failure: true
@@ -64,6 +71,8 @@ jobs:
     name: clippy on ${{ matrix.target }}
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # check out the tree
     strategy:
       fail-fast: false
       matrix:
@@ -73,21 +82,28 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          targets: ${{ matrix.target }}
-          components: clippy
+          persist-credentials: false
 
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      # rust-toolchain.toml names the toolchain and its components; rustup installs what it asks.
+      - name: toolchain
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup show
+          rustup target add "$TARGET"
+
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           key: lint-${{ matrix.target }}
           cache-on-failure: true
 
       - name: clippy
-        run: cargo clippy --workspace --all-targets --locked --target ${{ matrix.target }} -- -D warnings
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo clippy --workspace --all-targets --locked --target "$TARGET" -- -D warnings
 
       - name: sccache stats
         if: always()
@@ -97,6 +113,8 @@ jobs:
     name: ${{ matrix.target }}
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read # check out the tree
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +136,9 @@ jobs:
             arch: arm64
             setup: Sonora-Setup-arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: system dependencies
         if: runner.os == 'Linux'
@@ -131,19 +151,25 @@ jobs:
             libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
             libvulkan-dev libdbus-1-dev
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+      # rust-toolchain.toml names the toolchain and its components; rustup installs what it asks.
+      - name: toolchain
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup show
+          rustup target add "$TARGET"
 
-      - uses: mozilla-actions/sccache-action@v0.0.9
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           key: ${{ matrix.target }}
           cache-targets: false
           cache-on-failure: true
 
       - name: build
-        run: cargo build --release --locked --package sonora --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --package sonora --target "$TARGET"
 
       - name: sccache stats
         if: always()
@@ -181,9 +207,47 @@ jobs:
 
       # A convenience binary, not a release artefact: GitHub's artifact service times out often
       # enough that it must not be what turns a green build red.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         continue-on-error: true
         with:
           name: build-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
+
+  # Static analysis of the workflow files themselves.
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the tree
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+
+  # Supply-chain scan: local rules and OSV advisories.
+  argus:
+    name: argus
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # check out the tree
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      # The argus action is a two-line composite that installs from crates.io or an unpinned
+      # git ref, so the tool lands here pinned by revision instead.
+      - name: install argus
+        run: >
+          cargo install --locked
+          --git https://github.com/Quad4-Software/argus
+          --rev a8d04bace89a1efd7cd38981df286a10c1899d08
+
+      - name: scan
+        run: argus scan . --ci --fail-on high --format markdown --osv --vex openvex.json
