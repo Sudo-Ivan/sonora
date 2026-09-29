@@ -433,7 +433,9 @@ jobs:
             argus=${{ needs.argus.result }}
         run: |
           echo "$RESULTS"
-          if echo "$RESULTS" | grep -qvE '=(success|skipped)$'; then
+          # Blank trailing lines must not fail the gate; only a line naming a job that
+          # ended differently may.
+          if echo "$RESULTS" | grep -Ev '=(success|skipped)$' | grep -q .; then
             echo "a required job did not succeed"
             exit 1
           fi
