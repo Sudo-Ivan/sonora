@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.5] - 2026-09-29
+
+### Added
+
+- The Flatpak repository now publishes to GitHub Pages, signed by the fork's
+  own GPG key, so installs update in place with `flatpak update`.
+
+### Fixed
+
+- Release drafts pick up the Flatpak bundles again.
+
 ## [0.42.4] - 2026-09-29
 
 ### Added
