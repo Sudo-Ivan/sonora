@@ -322,7 +322,10 @@ fn open_window(cx: &mut App) {
             inactive_frame_interval: saver.interval(),
             is_movable: true,
             is_resizable: true,
-            app_id: Some("sonora".into()),
+            // Wayland resolves the window icon through the desktop file named like the
+            // app_id, so under Flatpak it has to be the exported id. Everywhere else the
+            // app ships sonora.desktop.
+            app_id: Some(std::env::var("FLATPAK_ID").unwrap_or_else(|_| "sonora".to_owned())),
             window_min_size: Some(LEAST_SIZE),
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             window_decorations: Some(decorations),

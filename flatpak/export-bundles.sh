@@ -9,7 +9,7 @@ fi
 REPO="$1"
 TAG="$2"
 OUT="$3"
-APP=io.github.nolight132.sonora
+APP=io.github.sudo-ivan.sonora
 BRANCH=stable
 RUNTIME_REPO=https://flathub.org/repo/flathub.flatpakrepo
 
