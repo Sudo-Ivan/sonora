@@ -10,7 +10,7 @@ use crate::shared::popups::{AccountPicker, CookiePrompt, SearchPopup, matches_qu
 use crate::shared::text;
 use crate::shared::veil::{Edge, veil};
 use gpui::{
-    AnyElement, App, ClickEvent, Context, Entity, FocusHandle, FontWeight, MouseButton,
+    AnyElement, App, ClickEvent, Context, Entity, FocusHandle, Focusable, FontWeight, MouseButton,
     MouseUpEvent, Pixels, Render, SharedString, Task, Window, div, px, relative,
 };
 use gpui::{ScrollHandle, prelude::*, svg};
@@ -25,10 +25,11 @@ use state::{
 };
 use ui::{ActiveTheme as _, Deck, LEADING, Scrollbar, Scroller, eyebrow, snapped};
 use ui::{
-    Avatar, Button, Checkbox, Dismiss, InfoCard, Initials, Input, Look, MAX_FONT, MAX_LYRICS_SCALE,
-    MAX_TRANSPARENCY, MIN_FONT, MIN_LYRICS_SCALE, MenuItem, Modal, Pace, Picker, Popovers, Radio,
-    Rounding, Saver, Scrubber, ScrubberState, Separator, Skeleton, Stillness, Switch, TabBar, Text,
-    Theme, ThemeKind, Vacancy, VisualizerStyle,
+    Avatar, Button, Checkbox, Dismiss, FORM_CONTEXT, InfoCard, Initials, Input, Look, MAX_FONT,
+    MAX_LYRICS_SCALE, MAX_TRANSPARENCY, MIN_FONT, MIN_LYRICS_SCALE, MenuItem, Modal, Pace, Picker,
+    Popovers, Radio, Rounding, Saver, Scrubber, ScrubberState, SelectNext, SelectPrevious,
+    Separator, Skeleton, Stillness, Submit, Switch, TabBar, Text, Theme, ThemeKind, Vacancy,
+    VisualizerStyle,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -2892,6 +2893,52 @@ impl SettingsView {
         cx.notify();
     }
 
+    /// Moves keyboard focus through the given fields, wrapping around at either end. Nothing
+    /// focused yet lands on the first field, so a first Tab does something useful.
+    fn focus_next(
+        fields: &[Entity<Input>],
+        backwards: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let current = fields
+            .iter()
+            .position(|field| field.read(cx).focus_handle(cx).is_focused(window));
+        let next = match (current, backwards) {
+            (Some(index), false) => (index + 1) % fields.len(),
+            (Some(index), true) => index.checked_sub(1).unwrap_or(fields.len() - 1),
+            (None, _) => 0,
+        };
+        fields[next].update(cx, |input, cx| input.focus(window, cx));
+    }
+
+    /// Wraps a multi-field prompt in the form key context so Tab and Shift-Tab walk the
+    /// fields and Enter submits, instead of falling through to nowhere.
+    fn fields_cycle(
+        &self,
+        fields: Vec<Entity<Input>>,
+        submit: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        prompt: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let forward = fields.clone();
+        div()
+            .key_context(FORM_CONTEXT)
+            .on_action(cx.listener(move |_, _: &SelectNext, window, cx| {
+                cx.stop_propagation();
+                Self::focus_next(&forward, false, window, cx);
+            }))
+            .on_action(cx.listener(move |_, _: &SelectPrevious, window, cx| {
+                cx.stop_propagation();
+                Self::focus_next(&fields, true, window, cx);
+            }))
+            .on_action(cx.listener(move |this, _: &Submit, _, cx| {
+                cx.stop_propagation();
+                submit(this, cx);
+            }))
+            .child(prompt)
+    }
+
     fn link_scrobble(&mut self, service: &'static str, link: Link, cx: &mut Context<Self>) {
         let first = self.scrobble_first.read(cx).text().to_string();
         let second = self.scrobble_second.read(cx).text().to_string();
@@ -2930,7 +2977,7 @@ impl SettingsView {
             _ => "settings-scrobble-request",
         };
 
-        Modal::new(
+        let modal = Modal::new(
             "settings-scrobble-prompt",
             t!("settings-scrobble-title", service = title.as_ref()),
         )
@@ -2978,7 +3025,18 @@ impl SettingsView {
                 .label(t!("settings-scrobble-connect"))
                 .on_click(cx.listener(move |this, _, _, cx| this.link_scrobble(service, link, cx))),
         )
-        .on_dismiss(cx.listener(|this, _, _, cx| this.close_scrobble(cx)))
+        .on_dismiss(cx.listener(|this, _, _, cx| this.close_scrobble(cx)));
+
+        let fields = match link {
+            Link::Token | Link::Browser => vec![self.scrobble_first.clone()],
+            _ => vec![self.scrobble_first.clone(), self.scrobble_second.clone()],
+        };
+        self.fields_cycle(
+            fields,
+            move |this, cx| this.link_scrobble(service, link, cx),
+            modal,
+            cx,
+        )
     }
 
     fn close_scrobble(&mut self, cx: &mut Context<Self>) {
@@ -3419,7 +3477,12 @@ impl SettingsView {
 
     fn credentials_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let insecure_tls = self.insecure_tls;
-        Modal::new("settings-server-prompt", t!("login-server-title"))
+        let fields = vec![
+            self.server.clone(),
+            self.username.clone(),
+            self.password.clone(),
+        ];
+        let modal = Modal::new("settings-server-prompt", t!("login-server-title"))
             .w(px(560.))
             .detail(t!("login-server-detail"))
             .child(self.server.clone())
@@ -3446,7 +3509,9 @@ impl SettingsView {
                     .primary()
                     .on_click(cx.listener(|this, _, _, cx| this.submit_credentials(cx))),
             )
-            .on_dismiss(cx.listener(|this, _, _, cx| this.abandon_credentials(cx)))
+            .on_dismiss(cx.listener(|this, _, _, cx| this.abandon_credentials(cx)));
+
+        self.fields_cycle(fields, Self::submit_credentials, modal, cx)
     }
 
     fn start_manual(&mut self, slug: &'static str, provider: &'static str, cx: &mut Context<Self>) {

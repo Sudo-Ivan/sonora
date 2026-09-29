@@ -138,6 +138,8 @@ fn shared() -> Vec<KeyBinding> {
         KeyBinding::new("escape", Dismiss, editing),
         KeyBinding::new("enter", Submit, form),
         KeyBinding::new("escape", Dismiss, form),
+        KeyBinding::new("tab", SelectNext, form),
+        KeyBinding::new("shift-tab", SelectPrevious, form),
     ]
 }
 

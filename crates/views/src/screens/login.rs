@@ -1,14 +1,16 @@
 use crate::shared::popups::{AccountPicker, CookiePrompt};
 use gpui::prelude::*;
 use gpui::{
-    ClipboardItem, Context, Entity, FontWeight, IntoElement, Pixels, Render, SharedString, Window,
-    div, px, svg,
+    ClipboardItem, Context, Entity, Focusable, FontWeight, IntoElement, Pixels, Render,
+    SharedString, Window, div, px, svg,
 };
 use i18n::t;
 use music::{AccountChoice, SignIn, SignInPrompt};
 use state::{Session, SessionState, Sonora};
 use ui::ActiveTheme as _;
-use ui::{Button, Checkbox, Input, Modal, TabBar, Text};
+use ui::{
+    Button, Checkbox, FORM_CONTEXT, Input, Modal, SelectNext, SelectPrevious, Submit, TabBar, Text,
+};
 
 const COLUMN: Pixels = px(280.);
 const LOGO: Pixels = px(48.);
@@ -68,6 +70,25 @@ impl LoginView {
         self.clear_credentials(cx);
         self.session
             .update(cx, |session, cx| session.cancel_sign_in(cx));
+    }
+
+    /// Moves keyboard focus through the credential fields, wrapping around at either end.
+    /// Nothing focused yet lands on the server field, so a first Tab does something useful.
+    fn focus_next_field(&mut self, backwards: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let fields = [
+            self.server.clone(),
+            self.username.clone(),
+            self.password.clone(),
+        ];
+        let current = fields
+            .iter()
+            .position(|field| field.read(cx).focus_handle(cx).is_focused(window));
+        let next = match (current, backwards) {
+            (Some(index), false) => (index + 1) % fields.len(),
+            (Some(index), true) => index.checked_sub(1).unwrap_or(fields.len() - 1),
+            (None, _) => 0,
+        };
+        fields[next].update(cx, |input, cx| input.focus(window, cx));
     }
 
     fn open_credentials(&mut self, slug: &'static str, cx: &mut Context<Self>) {
@@ -363,34 +384,50 @@ impl LoginView {
 
     fn credentials_prompt(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let insecure_tls = self.insecure_tls;
-        Modal::new("server-prompt", t!("login-server-title"))
-            .w(px(560.))
-            .detail(t!("login-server-detail"))
-            .child(self.server.clone())
-            .child(self.username.clone())
-            .child(self.password.clone())
+        div()
+            .key_context(FORM_CONTEXT)
+            .on_action(cx.listener(|this, _: &SelectNext, window, cx| {
+                cx.stop_propagation();
+                this.focus_next_field(false, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &SelectPrevious, window, cx| {
+                cx.stop_propagation();
+                this.focus_next_field(true, window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &Submit, _, cx| {
+                cx.stop_propagation();
+                this.submit_credentials(cx);
+            }))
             .child(
-                Checkbox::new("server-insecure-tls", insecure_tls)
-                    .label(t!("login-server-insecure"))
-                    .text_color(cx.theme().muted_foreground)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.insecure_tls = !insecure_tls;
-                        cx.notify();
-                    })),
+                Modal::new("server-prompt", t!("login-server-title"))
+                    .w(px(560.))
+                    .detail(t!("login-server-detail"))
+                    .child(self.server.clone())
+                    .child(self.username.clone())
+                    .child(self.password.clone())
+                    .child(
+                        Checkbox::new("server-insecure-tls", insecure_tls)
+                            .label(t!("login-server-insecure"))
+                            .text_color(cx.theme().muted_foreground)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.insecure_tls = !insecure_tls;
+                                cx.notify();
+                            })),
+                    )
+                    .action(
+                        Button::new("cancel-server")
+                            .ghost()
+                            .label(t!("common-cancel"))
+                            .on_click(cx.listener(|this, _, _, cx| this.abandon_credentials(cx))),
+                    )
+                    .action(
+                        Button::new("submit-server")
+                            .label(t!("login-server-submit"))
+                            .primary()
+                            .on_click(cx.listener(|this, _, _, cx| this.submit_credentials(cx))),
+                    )
+                    .on_dismiss(cx.listener(|this, _, _, cx| this.abandon_credentials(cx))),
             )
-            .action(
-                Button::new("cancel-server")
-                    .ghost()
-                    .label(t!("common-cancel"))
-                    .on_click(cx.listener(|this, _, _, cx| this.abandon_credentials(cx))),
-            )
-            .action(
-                Button::new("submit-server")
-                    .label(t!("login-server-submit"))
-                    .primary()
-                    .on_click(cx.listener(|this, _, _, cx| this.submit_credentials(cx))),
-            )
-            .on_dismiss(cx.listener(|this, _, _, cx| this.abandon_credentials(cx)))
     }
 
     fn secret_prompt(
