@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.3] - 2026-09-29
+
+### Fixed
+
+- Flatpak manifests and the desktop export use `io.github.sudo_ivan.sonora`, the only
+  spelling flatpak accepts (a hyphen is allowed in the last id segment only).
+- The SLSA provenance and publish jobs run off the needs chain instead of a tag `if`,
+  which skipped them even when the draft succeeded.
+
 ## [0.42.2] - 2026-09-29
 
 ### Added

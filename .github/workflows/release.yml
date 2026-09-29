@@ -729,8 +729,9 @@ jobs:
   # isolated reusable workflow, which is what keeps a compromised build job from forging it.
   provenance:
     name: SLSA provenance
+    # No explicit if: the draft job only succeeds on tag pushes, so needing it gates this
+    # job on tags already. An if on a uses job proved unreliable in the skipped-vs-run check.
     needs: [draft]
-    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       actions: read # read the workflow path for the provenance
       id-token: write # sign the provenance through Sigstore
@@ -749,8 +750,8 @@ jobs:
 
   publish:
     name: publish the release
+    # Same story: provenance only runs when the draft exists, so the needs chain is the gate.
     needs: [draft, provenance]
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
