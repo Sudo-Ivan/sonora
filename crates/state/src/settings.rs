@@ -415,6 +415,7 @@ struct StateValues {
     shuffle: bool,
     repeat: Repeat,
     radio: bool,
+    forever: bool,
     provider: String,
     tables: HashMap<String, Layout>,
     sorting: HashMap<String, Option<Sorting>>,
@@ -442,7 +443,8 @@ impl Default for StateValues {
             shuffle: false,
             repeat: Repeat::Off,
             radio: false,
-            provider: "spotify".to_owned(),
+            forever: false,
+            provider: "youtube".to_owned(),
             tables: HashMap::new(),
             sorting: HashMap::new(),
             filters: HashMap::new(),
@@ -770,6 +772,11 @@ impl AppSettings {
 
     pub fn radio(&self) -> bool {
         self.state.radio
+    }
+
+    /// Whether the queue keeps going on library picks once it runs short.
+    pub fn forever(&self) -> bool {
+        self.state.forever
     }
 
     pub fn language(&self) -> &str {
@@ -1275,6 +1282,11 @@ impl AppSettings {
 
     pub fn set_radio(&mut self, radio: bool, cx: &mut Context<Self>) {
         self.state.radio = radio;
+        self.schedule_state_save(cx);
+    }
+
+    pub fn set_forever(&mut self, forever: bool, cx: &mut Context<Self>) {
+        self.state.forever = forever;
         self.schedule_state_save(cx);
     }
 

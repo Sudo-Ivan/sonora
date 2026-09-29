@@ -887,6 +887,21 @@ impl Aside {
                             },
                         )
                         .child(
+                            Button::new("toggle-forever")
+                                .ghost()
+                                .small()
+                                .icon("icons/refresh-cw.svg")
+                                .tooltip("queue-forever")
+                                .tint(match self.playback.read(cx).forever() {
+                                    true => theme.primary,
+                                    false => theme.muted_foreground,
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.playback
+                                        .update(cx, |playback, cx| playback.toggle_forever(cx));
+                                })),
+                        )
+                        .child(
                             Button::new("reset-queue")
                                 .ghost()
                                 .small()

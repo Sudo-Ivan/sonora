@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -88,7 +88,10 @@ impl QueuePlacement {
 use crate::queue::Queue;
 use serde::{Deserialize, Serialize};
 
-use crate::{AppSettings, Io, Network, Outcome, Session, SessionEvent, Target, Toasts, join};
+use crate::{
+    AppSettings, Io, Network, Outcome, Session, SessionEvent, Shelf, Sonora, Target, Toasts, join,
+    mix,
+};
 
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
 const CLOCK_SETTLE: Duration = Duration::from_secs(1);
@@ -354,6 +357,8 @@ pub struct Playback {
     equalizer: Equalizer,
     repeat: Repeat,
     radio: bool,
+    /// Whether the queue tops itself up with library picks once it runs short.
+    forever: bool,
     /// The track the current similar-tracks suggestions were drawn from.
     seeded: Option<String>,
     /// Where the station the queue is playing goes on from, while the provider has more of it.
@@ -451,6 +456,7 @@ impl Playback {
         cx.observe(&queue, |this, _, cx| {
             this.continue_station(cx);
             this.suggest_similar(cx);
+            this.forever_fill(cx);
         })
         .detach();
 
@@ -463,6 +469,7 @@ impl Playback {
         );
         let repeat = settings.read(cx).repeat();
         let radio = settings.read(cx).radio();
+        let forever = settings.read(cx).forever();
 
         Self {
             state: PlaybackState::Idle,
@@ -481,6 +488,7 @@ impl Playback {
             equalizer,
             repeat,
             radio,
+            forever,
             seeded: None,
             station: None,
             topping: None,
@@ -744,6 +752,62 @@ impl Playback {
             })
             .ok();
         }));
+    }
+
+    /// Plays `seed` now and lines up the library's closest tracks behind it, scored locally
+    /// rather than fetched from a station. The seed's shelf is the pool; when it is empty the
+    /// other shelf's tracks stand in. What the queue already holds never comes back.
+    pub fn play_mix(&mut self, seed: &Track, cx: &mut Context<Self>) {
+        let Some(id) = seed.id.clone() else {
+            return self.failed(format!("{} has no track id", seed.name), cx);
+        };
+        if !seed.playable {
+            return self.failed(format!("{} is not available to stream", seed.name), cx);
+        }
+
+        let Some(library) = cx
+            .try_global::<Sonora>()
+            .map(|sonora| sonora.library.clone())
+        else {
+            return;
+        };
+        let library = library.read(cx);
+        let first = Shelf::of(&id);
+        let other = match first {
+            Shelf::Streaming => Shelf::Local,
+            Shelf::Local => Shelf::Streaming,
+        };
+        let Some(shelf) = [first, other]
+            .into_iter()
+            .find(|shelf| !library.state(*shelf).tracks().is_empty())
+        else {
+            return;
+        };
+        let pool = library.state(shelf).tracks();
+        let years: HashMap<&str, i32> = library
+            .state(shelf)
+            .albums()
+            .iter()
+            .filter(|album| album.year > 0)
+            .map(|album| (album.id.as_str(), album.year))
+            .collect();
+        let year = seed
+            .album_id
+            .as_deref()
+            .and_then(|album| years.get(album))
+            .copied();
+        let heard = self.queue.read(cx).ids();
+        let tracks = mix::score(seed, pool, &heard, year, &years);
+        if tracks.is_empty() {
+            return;
+        }
+
+        let origin = Origin::radio(id).named(seed.name.clone());
+        let mut queue = Vec::with_capacity(tracks.len() + 1);
+        queue.push(seed.clone());
+        queue.extend(tracks);
+        self.fetch = None;
+        self.begin(queue, 0, Some(origin), cx);
     }
 
     /// Starts a station from its seed alone, the way a pinned radio is played: its first
@@ -1264,6 +1328,26 @@ impl Playback {
         }
     }
 
+    pub fn forever(&self) -> bool {
+        self.forever
+    }
+
+    /// Turns the forever queue on or off, remembering it in settings. Turning it off drops
+    /// the suggestions only while provider radio is off too, since with it on the similar run
+    /// may hold its picks rather than the library's.
+    pub fn toggle_forever(&mut self, cx: &mut Context<Self>) {
+        self.forever = !self.forever;
+        let forever = self.forever;
+        self.settings
+            .update(cx, |settings, cx| settings.set_forever(forever, cx));
+        match (forever, self.radio) {
+            (true, _) => self.forever_fill(cx),
+            (false, false) => self.queue.update(cx, |queue, cx| queue.clear_similar(cx)),
+            (false, true) => {}
+        }
+        cx.notify();
+    }
+
     /// Plays one of the suggested similar tracks, making the suggestions the queue.
     pub fn play_similar(&mut self, index: usize, cx: &mut Context<Self>) {
         self.fetch = None;
@@ -1415,6 +1499,61 @@ impl Playback {
             })
             .ok();
         }));
+    }
+
+    /// Tops the suggestions up from the library once the queue has fewer than
+    /// `RADIO_LOOKAHEAD` tracks left, so a queue that outlives its source keeps playing. It
+    /// runs after the provider's own answers: a station stretch or a similar-tracks batch
+    /// that lands usually leaves nothing to fill, and a provider batch spawned while the run
+    /// was empty replaces whatever this filled, so radio stays first where it answers. What
+    /// the queue holds and what the last stretch of history played never come back. A fill
+    /// that lands while nothing is playing at all moves the queue on, the way a station
+    /// stretch does.
+    fn forever_fill(&mut self, cx: &mut Context<Self>) {
+        if !self.forever || self.topping.is_some() {
+            return;
+        }
+        let (started, short, idle) = {
+            let queue = self.queue.read(cx);
+            (
+                queue.current().is_some(),
+                queue.len() < RADIO_LOOKAHEAD,
+                self.track.is_none() && !queue.has_next(),
+            )
+        };
+        if !started || !short {
+            return;
+        }
+
+        let tracks = {
+            let Some(sonora) = cx.try_global::<Sonora>() else {
+                return;
+            };
+            let library = sonora.library.read(cx);
+            let pool: Vec<&Track> = [Shelf::Streaming, Shelf::Local]
+                .into_iter()
+                .flat_map(|shelf| library.state(shelf).tracks().iter())
+                .collect();
+            let mut heard = self.queue.read(cx).ids();
+            heard.extend(
+                sonora
+                    .history
+                    .read(cx)
+                    .tracks()
+                    .iter()
+                    .take(mix::FOREVER_HISTORY)
+                    .filter_map(|track| track.id.clone()),
+            );
+            mix::batch(&pool, &heard, mix::FOREVER_BATCH)
+        };
+        if tracks.is_empty() {
+            return;
+        }
+        self.queue
+            .update(cx, |queue, cx| queue.extend_similar(tracks, cx));
+        if idle {
+            self.follow_queue(Start::Segue, cx);
+        }
     }
 
     pub fn repeat(&self) -> Repeat {

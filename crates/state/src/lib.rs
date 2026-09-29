@@ -8,6 +8,7 @@ mod home;
 mod library;
 mod logging;
 mod lyrics;
+mod mix;
 mod mosaic;
 mod network;
 mod pins;

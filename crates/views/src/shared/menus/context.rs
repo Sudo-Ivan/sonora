@@ -388,6 +388,30 @@ impl ItemMenu {
                     .disabled(),
             ),
         };
+        // A mix is scored against the shelf's own tracks, so an empty shelf offers none.
+        let mixes = track
+            .id
+            .as_deref()
+            .is_some_and(|id| !library.read(cx).state(Shelf::of(id)).tracks().is_empty());
+        let mix = match (many || !mixes, track.id.is_some() && track.playable) {
+            (true, _) => None,
+            (false, true) => {
+                let track = track.clone();
+                Some(
+                    MenuItem::new("start-mix", t!("menu-start-mix"))
+                        .icon("icons/shuffle.svg")
+                        .on_click(move |_, _, cx| {
+                            let playback = Sonora::global(cx).playback.clone();
+                            playback.update(cx, |playback, cx| playback.play_mix(&track, cx));
+                        }),
+                )
+            }
+            (false, false) => Some(
+                MenuItem::new("start-mix", t!("menu-start-mix"))
+                    .icon("icons/shuffle.svg")
+                    .disabled(),
+            ),
+        };
         let toggle_library = library_toggle(tracks, &library, cx);
         let membership =
             (!barren && !imported && Sonora::global(cx).session.read(cx).capabilities().library)
@@ -504,7 +528,11 @@ impl ItemMenu {
                     .chain([library_action.unwrap_or(toggle_library)])
                     .chain(membership)
                     .collect(),
-                [next, queue, last].into_iter().chain(radio).collect(),
+                [next, queue, last]
+                    .into_iter()
+                    .chain(radio)
+                    .chain(mix)
+                    .collect(),
                 album.into_iter().chain(artist).collect(),
                 details
                     .into_iter()

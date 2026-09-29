@@ -12,18 +12,19 @@ pub struct Lenient {
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
     pub year: Option<i32>,
+    pub genre: Option<String>,
     pub cover: Option<(Vec<u8>, String)>,
 }
 
 /// Reads the frames we care about by hand, skipping every other frame purely by its declared
 /// byte size and never looking at what's inside it. `lofty` and `symphonia` both abort the
-/// *entire* tag the moment one frame's content doesn't parse — some gamerip taggers write a
-/// `WXXX` with no encoding byte at all, just the raw URL in its place — which throws away every
+/// *entire* tag the moment one frame's content doesn't parse - some gamerip taggers write a
+/// `WXXX` with no encoding byte at all, just the raw URL in its place - which throws away every
 /// other, perfectly well-formed frame right along with it. This only runs as the last resort,
 /// once both of those have already given up on the whole tag.
 ///
 /// Deliberately narrow: ID3v2.3/2.4 only (not v2.2's 3-byte frame ids), no extended header, no
-/// unsynchronisation — none of which showed up in the files this was written for. A tag using
+/// unsynchronisation - none of which showed up in the files this was written for. A tag using
 /// any of them is left exactly as `lofty`/`symphonia` already leave it.
 pub fn read(path: &Path) -> Option<Lenient> {
     let data = fs::read(path).ok()?;
@@ -78,6 +79,7 @@ pub fn read(path: &Path) -> Option<Lenient> {
             b"TYER" | b"TDRC" if lenient.year.is_none() => {
                 lenient.year = text(body).and_then(|value| value.get(0..4)?.parse().ok());
             }
+            b"TCON" if lenient.genre.is_none() => lenient.genre = text(body),
             b"APIC" if lenient.cover.is_none() => lenient.cover = picture(body),
             _ => {}
         }

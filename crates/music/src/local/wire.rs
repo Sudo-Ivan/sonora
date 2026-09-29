@@ -243,6 +243,7 @@ struct FallbackProbe {
     year: Option<i32>,
     release: Vec<String>,
     compilation: bool,
+    genre: Vec<String>,
     cover_data: Option<(Vec<u8>, String)>,
 }
 
@@ -312,6 +313,7 @@ fn probe_symphonia_at(path: &Path, skip: u64) -> Option<FallbackProbe> {
     let mut year = None;
     let mut release = Vec::new();
     let mut compilation = false;
+    let mut genre = Vec::new();
     let mut cover_data = None;
 
     let mut collect_metadata = |rev: &symphonia::core::meta::MetadataRevision| {
@@ -350,6 +352,9 @@ fn probe_symphonia_at(path: &Path, skip: u64) -> Option<FallbackProbe> {
                 }
                 Some(StandardTagKey::MusicBrainzReleaseType) => {
                     release.extend(clean_val(&tag.value));
+                }
+                Some(StandardTagKey::Genre) => {
+                    genre.extend(clean_val(&tag.value));
                 }
                 Some(StandardTagKey::Compilation) => {
                     compilation |= flagged(&tag.value.to_string());
@@ -391,6 +396,7 @@ fn probe_symphonia_at(path: &Path, skip: u64) -> Option<FallbackProbe> {
         year,
         release,
         compilation,
+        genre,
         cover_data,
     })
 }
@@ -535,6 +541,22 @@ pub fn track_from_file(
             .and_then(|fb| release_type(fb.release.iter().map(String::as_str), fb.compilation)),
     };
 
+    let tags = tag
+        .map(|tag| genres(tag.get_strings(ItemKey::Genre).map(str::to_owned)))
+        .filter(|tags| !tags.is_empty())
+        .unwrap_or_else(|| {
+            fallback
+                .as_ref()
+                .map(|fallback| genres(fallback.genre.iter().cloned()))
+                .filter(|tags| !tags.is_empty())
+                .or_else(|| {
+                    lenient
+                        .as_ref()
+                        .map(|lenient| genres(lenient.genre.iter().cloned()))
+                })
+                .unwrap_or_default()
+        });
+
     Some(Tagged {
         track: Track {
             id: Some(track_id(path)),
@@ -553,7 +575,7 @@ pub fn track_from_file(
             explicit: false,
             track_number,
             disc_number,
-            tags: Vec::new(),
+            tags,
             languages: Vec::new(),
             credits: Vec::new(),
         },
@@ -755,6 +777,17 @@ fn release_type<'a>(
 /// Whether a flag tag such as `COMPILATION` or `TCMP` is set, which taggers write as `1`.
 fn flagged(value: &str) -> bool {
     matches!(value.trim(), "1" | "true" | "True" | "TRUE")
+}
+
+/// Genre names as a track's tags, lowercased and without repeats so the mix scorer can
+/// compare them across providers.
+fn genres(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    values
+        .into_iter()
+        .map(|genre| genre.trim().to_lowercase())
+        .filter(|genre| !genre.is_empty() && seen.insert(genre.clone()))
+        .collect()
 }
 
 #[cfg(test)]
