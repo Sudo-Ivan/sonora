@@ -24,10 +24,9 @@ static TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 type Sent = Pin<Box<dyn Future<Output = Result<Response<AsyncBody>>> + Send>>;
 
 pub struct Client {
+    /// The registry-aware client: a self-hosted server the user marked trusted verifies
+    /// inside `music::tls`, so nothing here picks between clients.
     inner: reqwest::Client,
-    /// Reached only for the hosts `music::tls` has been asked to trust, such as a self-hosted
-    /// Subsonic server running a certificate the system roots reject.
-    insecure: reqwest::Client,
     handle: Handle,
     user_agent: HeaderValue,
     cache: Option<Arc<Mutex<DiskCache>>>,
@@ -49,13 +48,8 @@ impl Client {
             handle.spawn_blocking(move || with_cache(&cache, |cache| cache.sweep()));
         }
         Self {
-            inner: reqwest::Client::builder()
+            inner: music::tls::builder()
                 .user_agent(USER_AGENT)
-                .build()
-                .unwrap_or_default(),
-            insecure: reqwest::Client::builder()
-                .user_agent(USER_AGENT)
-                .danger_accept_invalid_certs(true)
                 .build()
                 .unwrap_or_default(),
             handle: handle.clone(),
@@ -76,7 +70,6 @@ impl HttpClient for Client {
 
     fn send(&self, request: Request<AsyncBody>) -> Sent {
         let client = self.inner.clone();
-        let insecure = self.insecure.clone();
         let handle = self.handle.clone();
         let cache = self.cache.clone();
 
@@ -86,10 +79,6 @@ impl HttpClient for Client {
 
             let fetch = handle.spawn(async move {
                 let uri = parts.uri.to_string();
-                let client = match music::tls::authority(&uri).is_some_and(music::tls::trusted) {
-                    true => insecure.clone(),
-                    false => client,
-                };
                 let cacheable = parts.method == Method::GET
                     && !parts.headers.contains_key(AUTHORIZATION)
                     && !parts.headers.contains_key(COOKIE)

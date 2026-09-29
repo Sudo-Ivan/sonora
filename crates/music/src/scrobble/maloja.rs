@@ -35,10 +35,12 @@ impl Service for Maloja {
             bail!("maloja needs a server url and an api key");
         }
 
-        let http = match insecure_tls {
-            true => crate::tls::insecure(),
-            false => super::http().clone(),
-        };
+        // The registry remembers the accepted certificate so the connect probe and every
+        // later scrobble answer the same trust decision without carrying the flag.
+        if insecure_tls && let Some(authority) = crate::tls::authority(&url) {
+            crate::tls::trust(authority);
+        }
+        let http = crate::tls::client();
         let answer = http
             .get(format!("{url}{API}/test"))
             .query(&[("key", &key)])
@@ -63,10 +65,12 @@ impl Service for Maloja {
     }
 
     async fn scrobble(&self, account: &Account, plays: &[Play]) -> Result<()> {
-        let http = match account.insecure_tls {
-            true => crate::tls::insecure(),
-            false => super::http().clone(),
-        };
+        if account.insecure_tls
+            && let Some(authority) = crate::tls::authority(&account.server)
+        {
+            crate::tls::trust(authority);
+        }
+        let http = crate::tls::client();
         for play in plays {
             let answer: Answer = http
                 .post(format!("{}{API}/newscrobble", account.server))

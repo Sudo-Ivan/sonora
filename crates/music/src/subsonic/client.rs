@@ -68,12 +68,9 @@ impl SubsonicClient {
         insecure_tls: bool,
     ) -> Result<Self> {
         let server = server.trim_end_matches('/').to_owned();
-        // One client serves the API and the streams, and its choice registers the server's
-        // certificate for the artwork fetcher, which only ever sees a cover's url.
-        let http = match insecure_tls {
-            true => crate::tls::insecure(),
-            false => reqwest::Client::new(),
-        };
+        // The shared registry-aware client serves the API and the streams, and the
+        // registration here is what the artwork fetcher consults for a cover's url.
+        let http = crate::tls::client();
         if let Some(authority) = crate::tls::authority(&server) {
             match insecure_tls {
                 true => crate::tls::trust(authority),

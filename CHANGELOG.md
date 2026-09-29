@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Sign-in and scrobble dialogs move keyboard focus between fields with Tab and Shift-Tab,
+  and Enter submits the form.
+
+### Fixed
+
+- Servers marked to trust an invalid certificate no longer spam the log with TLS errors on
+  every request: the certificate verifier consults the trust registry before the platform
+  verifier runs, so the decision is silent where the user already made it.
+
 ## [0.42.3] - 2026-09-29
 
 ### Fixed
