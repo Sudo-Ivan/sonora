@@ -2,7 +2,7 @@
 
 # Sonora
 
-[![Build](https://img.shields.io/github/actions/workflow/status/Sudo-Ivan/sonora/release.yml?style=flat-square&label=build)](https://github.com/Sudo-Ivan/sonora/actions/workflows/release.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/Sudo-Ivan/sonora/ci.yml?style=flat-square&label=build)](https://github.com/Sudo-Ivan/sonora/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/Sudo-Ivan/sonora?style=flat-square&label=license)](./COPYING)
 
 ### A native music streaming client, built with Rust and GPUI
