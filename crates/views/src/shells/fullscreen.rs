@@ -445,6 +445,23 @@ impl FullscreenView {
         let album = track.as_ref().and_then(|track| track.album_id.clone());
         let explicit = track.as_ref().is_some_and(|track| track.explicit);
         let held = track.clone();
+        let trailing = |track: Option<music::Track>, cx: &App| {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap_2()
+                .when(explicit, |this| {
+                    this.child(div().flex_none().child(ExplicitBadge::new()))
+                })
+                .child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .opacity(1. - hide)
+                        .child(like(track, cx).when(frosted, Button::frosted)),
+                )
+        };
 
         div()
             .relative()
@@ -459,16 +476,25 @@ impl FullscreenView {
             .child(
                 // Three-part row with equal flex sides, so the title stays truly centred:
                 // the heart and the explicit badge live in the right cell and never shift it.
-                // Both sides have to stay styled the same and the room around the title has to
-                // come from the row gap, since padding on a side floors that side flex basis
-                // and makes it the wider one.
+                // The left cell holds an invisible copy of the right one, so both sides floor
+                // at the same width and a long title truncates instead of pushing the heart out
+                // of the row. The room around the title comes from the row gap, since padding
+                // on a side would make that side the wider one.
                 div()
                     .flex()
                     .items_center()
                     .gap_2()
                     .w_full()
                     .min_w_0()
-                    .child(div().flex_1().min_w_0())
+                    .child(
+                        div()
+                            .id("fullscreen-title-balance")
+                            .flex()
+                            .flex_1()
+                            .justify_end()
+                            .invisible()
+                            .child(trailing(None, cx)),
+                    )
                     .child(
                         div()
                             .id("fullscreen-title")
@@ -494,24 +520,7 @@ impl FullscreenView {
                             )
                             .child(title),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .min_w_0()
-                            .items_center()
-                            .gap_2()
-                            .when(explicit, |this| {
-                                this.child(div().flex_none().child(ExplicitBadge::new()))
-                            })
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_none()
-                                    .opacity(1. - hide)
-                                    .child(like(track.clone(), cx).when(frosted, Button::frosted)),
-                            ),
-                    ),
+                    .child(div().flex().flex_1().child(trailing(track.clone(), cx))),
             )
             .when_some(track, |this, track| {
                 this.child(
