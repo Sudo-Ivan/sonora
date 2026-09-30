@@ -5,29 +5,34 @@ use gpui::{Context, Entity, Task};
 use music::{Genre, GenreDetail, GenreItem, GenreSection};
 use tokio::task::AbortHandle;
 
-use crate::{Io, Session, SessionEvent, join};
+use crate::{Io, Session, SessionEvent, Shelf, join};
 
+/// The genres a shelf offers for browsing, for the search page's browse grid and the
+/// library's Genres tab. A streaming shelf's load once an account lands; a local one reloads
+/// whenever the scan changes, since its genres come from the files' tags.
 pub struct Genres {
     genres: Rc<Vec<Genre>>,
     loading: bool,
     error: Option<String>,
+    shelf: Shelf,
     session: Entity<Session>,
     io: Io,
     task: Option<Task<()>>,
 }
 
 impl Genres {
-    pub fn new(session: Entity<Session>, io: Io, cx: &mut Context<Self>) -> Self {
-        cx.subscribe(&session, |this, _, event, cx| match event {
-            SessionEvent::SignedIn => this.load(cx),
-            SessionEvent::SignedOut => {
+    pub fn new(session: Entity<Session>, io: Io, shelf: Shelf, cx: &mut Context<Self>) -> Self {
+        cx.subscribe(&session, move |this, _, event, cx| match event {
+            SessionEvent::SignedIn if shelf == Shelf::Streaming => this.load(cx),
+            SessionEvent::SignedOut if shelf == Shelf::Streaming => {
                 this.task = None;
                 this.genres = Rc::new(Vec::new());
                 this.loading = false;
                 this.error = None;
                 cx.notify();
             }
-            SessionEvent::Reconnected | SessionEvent::LocalChanged => {}
+            SessionEvent::LocalChanged if shelf == Shelf::Local => this.reload(cx),
+            _ => {}
         })
         .detach();
 
@@ -35,6 +40,7 @@ impl Genres {
             genres: Rc::new(Vec::new()),
             loading: false,
             error: None,
+            shelf,
             session,
             io,
             task: None,
@@ -76,11 +82,20 @@ impl Genres {
         self.error.as_deref()
     }
 
+    /// Clears the list and fetches it again, for a shelf whose contents changed under it.
+    pub fn reload(&mut self, cx: &mut Context<Self>) {
+        self.task = None;
+        self.genres = Rc::new(Vec::new());
+        self.loading = false;
+        self.error = None;
+        self.load(cx);
+    }
+
     pub fn load(&mut self, cx: &mut Context<Self>) {
         if self.loading || !self.genres.is_empty() {
             return;
         }
-        let Some(client) = self.session.read(cx).client() else {
+        let Some(client) = self.session.read(cx).client_of(self.shelf) else {
             return;
         };
 
@@ -113,6 +128,7 @@ pub struct GenreDetails {
     error: Option<String>,
     session: Entity<Session>,
     genres: Entity<Genres>,
+    local_genres: Entity<Genres>,
     io: Io,
     task: Option<Task<()>>,
     request: Option<AbortHandle>,
@@ -122,6 +138,7 @@ impl GenreDetails {
     pub fn new(
         session: Entity<Session>,
         genres: Entity<Genres>,
+        local_genres: Entity<Genres>,
         io: Io,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -148,6 +165,7 @@ impl GenreDetails {
             error: None,
             session,
             genres,
+            local_genres,
             io,
             task: None,
             request: None,
@@ -222,11 +240,16 @@ impl GenreDetails {
 
     fn adopt(&mut self, id: &str, detail: Arc<GenreDetail>, cx: &mut Context<Self>) {
         let cover = pictured(&detail);
-        self.genres
-            .update(cx, |genres, cx| match detail.sections.is_empty() {
-                true => genres.forget(id, cx),
-                false => genres.adopt(id, cover, cx),
-            });
+        // The genre list the page came from is the one that hears about its cover or its
+        // removal, so a local genre lands on the local one.
+        let listed = match music::is_local_id(id) {
+            true => &self.local_genres,
+            false => &self.genres,
+        };
+        listed.update(cx, |genres, cx| match detail.sections.is_empty() {
+            true => genres.forget(id, cx),
+            false => genres.adopt(id, cover, cx),
+        });
         self.sections = Rc::new(detail.sections.clone());
         self.detail = Some(detail);
     }

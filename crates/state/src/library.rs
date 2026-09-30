@@ -8,7 +8,7 @@ use gpui::{App, Context, Entity, SharedString, Task};
 use music::{Album, MediaKind, MusicApi, Page, Pages, Playlist, SavedArtist, Shape, Track};
 
 use crate::snapshot::{Kind, Remembered, Snapshots};
-use crate::{Io, Network, Outcome, Session, SessionEvent, Target, Toasts, join, mosaic};
+use crate::{Io, Mix, Network, Outcome, Session, SessionEvent, Target, Toasts, join, mix, mosaic};
 
 const FATAL: [LibraryPart; 3] = [
     LibraryPart::Tracks,
@@ -76,6 +76,10 @@ struct Held {
     /// provider. The part's real rows replace them once they have all arrived.
     stale: HashSet<LibraryPart>,
     starred: Starred,
+    /// Whether the starred tracks of a catalog shelf are still on their way. They arrive on a
+    /// fetch of their own, beside the parts, so the favorites page would otherwise read empty
+    /// between the catalog landing and them.
+    starred_pending: bool,
     tasks: Vec<Task<()>>,
 }
 
@@ -88,6 +92,7 @@ impl Held {
             expected: HashMap::new(),
             stale: HashSet::new(),
             starred: Starred::default(),
+            starred_pending: false,
             tasks: Vec::new(),
         }
     }
@@ -377,7 +382,11 @@ fn settle(
 /// `saved_playlists` on `MusicApi` to load it from.
 fn star(held: &mut Held, landed: Landed) -> bool {
     match landed {
-        Landed::Tracks(result) => hold("tracks", result, &mut held.starred.tracks),
+        Landed::Tracks(result) => hold(
+            "tracks",
+            result.map(|tracks| tracks.into_iter().filter(|track| track.playable).collect()),
+            &mut held.starred.tracks,
+        ),
         Landed::Albums(result) => hold("albums", result, &mut held.starred.albums),
         Landed::Artists(result) => hold("artists", result, &mut held.starred.artists),
         Landed::Playlists(_) => false,
@@ -1175,6 +1184,37 @@ impl Library {
                 .iter()
                 .any(|track| track.id.as_deref() == Some(track_id))
         })
+    }
+
+    /// The shelf's favorite songs: the listed tracks on a `Saved` shelf, where the library is
+    /// the favorites, and the starred set on a `Catalog` one, where they sit beside it.
+    pub fn favorite_tracks(&self, shelf: Shelf) -> &[Track] {
+        self.held(shelf)
+            .favorites()
+            .map_or(&[], |favorites| favorites.tracks)
+    }
+
+    /// Whether the shelf's favorites are still arriving: the shelf itself, and on a catalog
+    /// shelf the starred set beside it, which lands on a fetch of its own.
+    pub fn favorites_loading(&self, shelf: Shelf) -> bool {
+        self.loading(shelf, LibraryPart::Tracks) || self.held(shelf).starred_pending
+    }
+
+    /// The artist mixes the shelf's tracks make, favorites first, for the cards of the Mixes
+    /// page. Each one's seed is what `Playback::play_mix` scores the shelf against.
+    pub fn mixes(&self, shelf: Shelf) -> Vec<Mix> {
+        let held = self.held(shelf);
+        let favorites: HashSet<String> = held
+            .favorites()
+            .map(|favorites| {
+                favorites
+                    .tracks
+                    .iter()
+                    .filter_map(|track| track.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        mix::seeds(held.state.tracks(), &favorites, mix::MIXES)
     }
 
     fn favorites(&self, id: &str) -> Option<Favorites<'_>> {
@@ -1975,6 +2015,7 @@ impl Library {
         let held = self.held_mut(shelf);
         held.shape = shape;
         held.awaited = LibraryPart::ALL.to_vec();
+        held.starred_pending = shape == Shape::Catalog;
         match held.stale.is_empty() {
             true => {
                 held.state = LibraryState::Loading;
@@ -2173,6 +2214,9 @@ impl Library {
 
     fn land_starred(&mut self, shelf: Shelf, landed: Landed, cx: &mut Context<Self>) {
         let part = landed.part();
+        if part == LibraryPart::Tracks {
+            self.held_mut(shelf).starred_pending = false;
+        }
         if star(self.held_mut(shelf), landed) {
             self.keep(shelf, Kind::Starred, part, cx);
         }

@@ -47,6 +47,7 @@ pub const LOCAL_TRACK_PREFIX: &str = "local:";
 pub const LOCAL_ALBUM_PREFIX: &str = "local-album:";
 pub const LOCAL_ARTIST_PREFIX: &str = "local-artist:";
 pub const LOCAL_PLAYLIST_PREFIX: &str = "local-playlist:";
+pub const LOCAL_GENRE_PREFIX: &str = "local-genre:";
 
 /// The most recommendations a provider hands one list of an album or artist page, so a
 /// rail never asks for or draws more than this many releases or artists.
@@ -57,6 +58,7 @@ pub fn is_local_id(id: &str) -> bool {
         || id.starts_with(LOCAL_ALBUM_PREFIX)
         || id.starts_with(LOCAL_ARTIST_PREFIX)
         || id.starts_with(LOCAL_PLAYLIST_PREFIX)
+        || id.starts_with(LOCAL_GENRE_PREFIX)
 }
 
 pub fn distinct_covers(tracks: &[Track], wanted: usize) -> Vec<String> {
@@ -687,5 +689,24 @@ pub trait MusicProvider: Send + Sync {
     /// sign-in, and the app offers no `Secret` option for it.
     fn web_sign_in(&self) -> Option<WebSignIn> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_local_id;
+
+    #[test]
+    fn local_ids_cover_every_local_kind() {
+        for id in [
+            "local:/music/a.flac",
+            "local-album:0123456789abcdef",
+            "local-artist:Artist",
+            "local-playlist:1",
+            "local-genre:rock",
+        ] {
+            assert!(is_local_id(id), "{id}");
+        }
+        assert!(!is_local_id("youtube:abc"));
     }
 }

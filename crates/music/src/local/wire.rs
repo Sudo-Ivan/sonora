@@ -16,8 +16,8 @@ use symphonia::core::probe::Hint;
 
 use super::id3;
 use crate::{
-    Album, ArtistRef, LOCAL_ALBUM_PREFIX, LOCAL_ARTIST_PREFIX, LOCAL_TRACK_PREFIX, ReleaseType,
-    Track,
+    Album, ArtistRef, LOCAL_ALBUM_PREFIX, LOCAL_ARTIST_PREFIX, LOCAL_GENRE_PREFIX,
+    LOCAL_TRACK_PREFIX, ReleaseType, Track,
 };
 
 const COVER_NAMES: &[&str] = &[
@@ -161,6 +161,17 @@ pub fn artist_id(name: &str) -> String {
 
 pub fn artist_name_from_id(id: &str) -> Option<&str> {
     id.strip_prefix(LOCAL_ARTIST_PREFIX)
+}
+
+/// The id a genre carries across the api: the tag text normalized, so spellings that differ
+/// only by case or padding land on the same page.
+pub fn genre_id(name: &str) -> String {
+    format!("{LOCAL_GENRE_PREFIX}{}", normalize(name))
+}
+
+/// The normalized tag a genre id names, which `genre` matches tracks by.
+pub fn genre_key_from_id(id: &str) -> Option<&str> {
+    id.strip_prefix(LOCAL_GENRE_PREFIX)
 }
 
 fn artist_ref(name: &str) -> ArtistRef {

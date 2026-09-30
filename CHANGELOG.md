@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Favorites, Mixes and Genres tabs under Library and Local Music. Favorites lists the shelf's
+  starred songs, Mixes are per-artist mixes scored from its tracks, and Genres browse the
+  provider's categories or the local files' own genre tags.
+
 ## [0.42.5] - 2026-09-29
 
 ### Added

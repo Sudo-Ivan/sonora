@@ -42,6 +42,7 @@ pub use library::{
 };
 pub use logging::log_file;
 pub use lyrics::{Lyrics, LyricsState};
+pub use mix::Mix;
 pub use network::{Network, Reconnected};
 pub use pins::{PinSort, Pins};
 pub use playback::{Origin, Playback, PlaybackState, Repeat, Sleep, Whence};

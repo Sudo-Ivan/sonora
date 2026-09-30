@@ -53,11 +53,14 @@ const NAV: [(Option<NavEntry>, &str, Destination); 6] = [
     ),
 ];
 
-const LIBRARY_TABS: [(&str, LibraryTab); 4] = [
+const LIBRARY_TABS: [(&str, LibraryTab); 7] = [
     ("nav-songs", LibraryTab::Songs),
+    ("nav-favorites", LibraryTab::Favorites),
     ("nav-albums", LibraryTab::Albums),
     ("nav-artists", LibraryTab::Artists),
     ("nav-playlists", LibraryTab::Playlists),
+    ("nav-mixes", LibraryTab::Mixes),
+    ("nav-genres", LibraryTab::Genres),
 ];
 
 const MIN_WIDTH: Pixels = px(160.);

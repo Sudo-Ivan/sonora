@@ -355,6 +355,31 @@ pub(crate) fn grid(
         .into_any_element()
 }
 
+/// The shape `grid` takes while its genres are still loading, so the page is not a blank
+/// pane under the tabs.
+pub(crate) fn grid_skeleton(width: Pixels, window: &Window, cx: &App) -> AnyElement {
+    let lanes = lanes(width);
+    let row = snapped(cx.theme().metrics.list_row, window);
+
+    div()
+        .flex()
+        .flex_col()
+        .w_full()
+        .gap(LANE_GAP)
+        .children((0..LANES * 2).map(|_| {
+            div().flex().w_full().gap_2().children((0..lanes).map(|_| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .h(row)
+                    .child(Skeleton::new().size_full())
+            }))
+        }))
+        .into_any_element()
+}
+
 fn lanes(width: Pixels) -> usize {
     ((width / PLATE).floor().max(1.) as usize).min(LANES)
 }

@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use storage::Database;
 
 use crate::{
-    Album, AlbumCatalogue, AlbumDetail, Artist, ArtistProfile, GenreItem, GenreSection, HomeFeed,
-    MediaKind, MusicApi, Playlist, PlaylistDetail, SUGGESTIONS, SavedArtist, Track, TrackTags,
-    UserProfile, distinct_covers,
+    Album, AlbumCatalogue, AlbumDetail, Artist, ArtistProfile, Genre, GenreDetail, GenreItem,
+    GenreSection, HomeFeed, MediaKind, MusicApi, Playlist, PlaylistDetail, SUGGESTIONS,
+    SavedArtist, Track, TrackTags, UserProfile, distinct_covers,
 };
 
 use super::index::Index;
@@ -135,6 +135,44 @@ impl LocalClient {
         artists.sort_by_key(|artist| artist.name.to_lowercase());
         artists
     }
+}
+
+/// One genre the scan's tags make: its display spelling, the tracks carrying it and the
+/// first cover among them.
+struct GenreTally {
+    name: String,
+    tracks: Vec<Track>,
+    cover: Option<String>,
+}
+
+/// Every genre tag in `tracks`, most tracks first and ties by name. Spellings that differ
+/// only by case or padding are one genre, named by the first spelling a file carries.
+fn genres_of(tracks: &[Track]) -> Vec<GenreTally> {
+    let mut tallies: HashMap<String, GenreTally> = HashMap::new();
+    for track in tracks {
+        for tag in &track.tags {
+            let tally = tallies
+                .entry(wire::normalize(tag))
+                .or_insert_with(|| GenreTally {
+                    name: tag.clone(),
+                    tracks: Vec::new(),
+                    cover: None,
+                });
+            tally.tracks.push(track.clone());
+            if tally.cover.is_none() {
+                tally.cover = track.cover.clone();
+            }
+        }
+    }
+
+    let mut genres: Vec<GenreTally> = tallies.into_values().collect();
+    genres.sort_by(|a, b| {
+        b.tracks
+            .len()
+            .cmp(&a.tracks.len())
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    genres
 }
 
 fn playlist_from(id: String, name: String, modified_at: i64, tracks: &[Track]) -> Playlist {
@@ -635,6 +673,66 @@ impl MusicApi for LocalClient {
             sections,
         })
     }
+
+    /// The genres the scanned files' tags make, the ones with most tracks first. A genre's
+    /// cover is the first of its tracks', and its name the first spelling seen, since tags
+    /// disagree on casing.
+    async fn genres(&self) -> Result<Vec<Genre>> {
+        let scanned = self.scanned.read().unwrap();
+        Ok(genres_of(&scanned.tracks)
+            .into_iter()
+            .map(|tally| Genre {
+                id: wire::genre_id(&tally.name),
+                name: tally.name,
+                cover: tally.cover,
+            })
+            .collect())
+    }
+
+    /// The page of one genre: its albums first, then every track carrying the tag. An id
+    /// naming nothing in the scan answers empty rather than failing, the way a genre whose
+    /// last tagged file was removed does.
+    async fn genre(&self, genre_id: &str) -> Result<GenreDetail> {
+        let key = wire::genre_key_from_id(genre_id)
+            .ok_or_else(|| anyhow!("{genre_id} is not a local genre id"))?;
+        let scanned = self.scanned.read().unwrap();
+        let Some(tally) = genres_of(&scanned.tracks)
+            .into_iter()
+            .find(|tally| wire::normalize(&tally.name) == key)
+        else {
+            return Ok(GenreDetail::default());
+        };
+
+        let album_ids: HashSet<&str> = tally
+            .tracks
+            .iter()
+            .filter_map(|track| track.album_id.as_deref())
+            .collect();
+        let albums: Vec<GenreItem> = scanned
+            .albums
+            .iter()
+            .filter(|album| album_ids.contains(album.id.as_str()))
+            .cloned()
+            .map(GenreItem::Album)
+            .collect();
+
+        let mut sections = Vec::new();
+        if !albums.is_empty() {
+            sections.push(GenreSection {
+                title: "nav-albums".to_owned(),
+                items: albums,
+            });
+        }
+        sections.push(GenreSection {
+            title: "nav-songs".to_owned(),
+            items: tally.tracks.into_iter().map(GenreItem::Track).collect(),
+        });
+
+        Ok(GenreDetail {
+            name: tally.name,
+            sections,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -721,6 +819,127 @@ mod tests {
         assert!(ids.contains(&"local:0"));
         assert!(ids.contains(&"local:1"));
         assert!(ids.contains(&"local:2"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn tagged_track(id: &str, tags: &[&str], album_id: Option<&str>, cover: Option<&str>) -> Track {
+        let mut track = test_track(id, id, "Artist", "Album");
+        track.tags = tags.iter().map(|tag| tag.to_string()).collect();
+        track.album_id = album_id.map(str::to_owned);
+        track.cover = cover.map(str::to_owned);
+        track
+    }
+
+    fn test_album(id: &str) -> Album {
+        Album {
+            id: id.to_owned(),
+            name: format!("Album {id}"),
+            artists: "Artist".to_owned(),
+            artist_refs: Vec::new(),
+            cover: None,
+            cover_large: None,
+            release_type: crate::ReleaseType::Album,
+            year: 2000,
+            track_count: 0,
+            release_date: String::new(),
+            label: String::new(),
+            copyrights: Vec::new(),
+            added_at: None,
+        }
+    }
+
+    fn client_with(scanned: Scanned) -> (LocalClient, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("sonora-test-{}", fastrand::u64(..)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::at(dir.join("state.sqlite"));
+        let cache = storage::Cache::at(dir.join("cache.sqlite"));
+        let index = Index::new(cache);
+        (LocalClient::new(scanned, db, dir.clone(), index), dir)
+    }
+
+    #[tokio::test]
+    async fn genres_merges_spellings_and_orders_by_count() {
+        let tracks = vec![
+            tagged_track("local:0", &["Rock"], None, Some("cover-a")),
+            tagged_track("local:1", &[" rock "], None, None),
+            tagged_track("local:2", &["indie", "pop"], None, Some("cover-b")),
+        ];
+        let (client, dir) = client_with(Scanned {
+            playlists: Vec::new(),
+            tracks,
+            albums: Vec::new(),
+            portraits: HashMap::new(),
+        });
+
+        let genres = client.genres().await.unwrap();
+
+        assert_eq!(
+            genres
+                .iter()
+                .map(|genre| genre.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Rock", "indie", "pop"]
+        );
+        let rock = &genres[0];
+        assert_eq!(rock.id, "local-genre:rock");
+        assert_eq!(rock.cover.as_deref(), Some("cover-a"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn genre_page_lists_its_albums_then_songs() {
+        let tracks = vec![
+            tagged_track("local:0", &["Rock"], Some("local-album:a"), None),
+            tagged_track("local:1", &["Rock"], Some("local-album:b"), None),
+            tagged_track("local:2", &["Jazz"], Some("local-album:c"), None),
+        ];
+        let (client, dir) = client_with(Scanned {
+            playlists: Vec::new(),
+            tracks,
+            albums: vec![
+                test_album("local-album:a"),
+                test_album("local-album:b"),
+                test_album("local-album:c"),
+            ],
+            portraits: HashMap::new(),
+        });
+
+        let detail = client.genre("local-genre:rock").await.unwrap();
+
+        assert_eq!(detail.name, "Rock");
+        assert_eq!(detail.sections.len(), 2);
+        assert_eq!(detail.sections[0].title, "nav-albums");
+        assert_eq!(
+            detail.sections[0]
+                .items
+                .iter()
+                .map(|item| match item {
+                    GenreItem::Album(album) => album.id.as_str(),
+                    _ => unreachable!(),
+                })
+                .collect::<Vec<_>>(),
+            ["local-album:a", "local-album:b"]
+        );
+        assert_eq!(detail.sections[1].title, "nav-songs");
+        assert_eq!(detail.sections[1].items.len(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn genre_page_for_an_unknown_id_is_empty() {
+        let (client, dir) = client_with(Scanned {
+            playlists: Vec::new(),
+            tracks: vec![tagged_track("local:0", &["Rock"], None, None)],
+            albums: Vec::new(),
+            portraits: HashMap::new(),
+        });
+
+        let detail = client.genre("local-genre:ska").await.unwrap();
+        assert!(detail.sections.is_empty());
+        assert!(client.genre("not-a-genre").await.is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

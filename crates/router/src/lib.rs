@@ -9,9 +9,12 @@ use gpui::{App, AppContext as _, Entity, Global, SharedString};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LibraryTab {
     Songs,
+    Favorites,
     Albums,
     Playlists,
     Artists,
+    Mixes,
+    Genres,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,20 +66,26 @@ pub enum Screen {
     Search,
     History,
     Songs,
+    Favorites,
     Albums,
     Playlists,
     Artists,
+    Mixes,
+    Genres,
     Imported,
 }
 
 impl Screen {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 11] = [
         Self::Home,
         Self::Search,
         Self::Songs,
+        Self::Favorites,
         Self::Albums,
         Self::Artists,
         Self::Playlists,
+        Self::Mixes,
+        Self::Genres,
         Self::Imported,
         Self::History,
     ];
@@ -87,9 +96,12 @@ impl Screen {
             Self::Search => "search",
             Self::History => "history",
             Self::Songs => "songs",
+            Self::Favorites => "favorites",
             Self::Albums => "albums",
             Self::Playlists => "playlists",
             Self::Artists => "artists",
+            Self::Mixes => "mixes",
+            Self::Genres => "genres",
             Self::Imported => "imported",
         }
     }
@@ -100,9 +112,12 @@ impl Screen {
             Self::Search => "nav-search",
             Self::History => "nav-history",
             Self::Songs => "nav-songs",
+            Self::Favorites => "nav-favorites",
             Self::Albums => "nav-albums",
             Self::Playlists => "nav-playlists",
             Self::Artists => "nav-artists",
+            Self::Mixes => "nav-mixes",
+            Self::Genres => "nav-genres",
             Self::Imported => "nav-local",
         }
     }
@@ -117,9 +132,12 @@ impl Screen {
             Self::Search => Destination::Search,
             Self::History => Destination::History,
             Self::Songs => Destination::Library(LibraryTab::Songs),
+            Self::Favorites => Destination::Library(LibraryTab::Favorites),
             Self::Albums => Destination::Library(LibraryTab::Albums),
             Self::Playlists => Destination::Library(LibraryTab::Playlists),
             Self::Artists => Destination::Library(LibraryTab::Artists),
+            Self::Mixes => Destination::Library(LibraryTab::Mixes),
+            Self::Genres => Destination::Library(LibraryTab::Genres),
             Self::Imported => Destination::Local(LibraryTab::Songs),
         }
     }

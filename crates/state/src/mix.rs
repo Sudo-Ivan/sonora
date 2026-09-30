@@ -2,6 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use music::Track;
 
+/// How many artist mixes the Mixes page lists at most.
+pub(crate) const MIXES: usize = 12;
+
 /// How many tracks a mix lines up behind its seed at most.
 pub(crate) const MIX_LIMIT: usize = 30;
 
@@ -40,6 +43,71 @@ const ERA_SPAN: i32 = 10;
 /// spreads across the library instead of settling on whoever scored highest.
 const ARTIST_REPEAT: f32 = 6.;
 const ALBUM_REPEAT: f32 = 2.;
+
+/// A ready-made mix on the Mixes page: the artist it is named for, and the track
+/// `Playback::play_mix` scores the shelf against to build it.
+#[derive(Clone, Debug)]
+pub struct Mix {
+    pub name: String,
+    pub seed: Track,
+}
+
+/// The mixes a shelf's tracks make, one per artist, best first and `limit` at most. An
+/// artist with more of the shelf's favorites comes first, then one with more tracks, then
+/// alphabetical, so the page leads with whoever the listener keeps around. A mix's seed is
+/// the artist's first favorite in library order, else its first playable track there.
+pub(crate) fn seeds(tracks: &[Track], favorites: &HashSet<String>, limit: usize) -> Vec<Mix> {
+    struct Group<'a> {
+        name: &'a str,
+        starred: usize,
+        seed: &'a Track,
+        size: usize,
+    }
+
+    let mut groups: HashMap<&str, Group> = HashMap::new();
+    for track in tracks {
+        let Some(id) = track.id.as_deref() else {
+            continue;
+        };
+        if !track.playable {
+            continue;
+        }
+        let name = track
+            .artist_refs
+            .first()
+            .map(|artist| artist.name.as_str())
+            .unwrap_or(&track.artists);
+        let group = groups.entry(artist_key(track)).or_insert_with(|| Group {
+            name,
+            starred: 0,
+            seed: track,
+            size: 0,
+        });
+        group.size += 1;
+        if favorites.contains(id) {
+            group.starred += 1;
+            if !favorites.contains(group.seed.id.as_deref().unwrap_or_default()) {
+                group.seed = track;
+            }
+        }
+    }
+
+    let mut groups: Vec<Group> = groups.into_values().collect();
+    groups.sort_by(|a, b| {
+        b.starred
+            .cmp(&a.starred)
+            .then_with(|| b.size.cmp(&a.size))
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    groups
+        .into_iter()
+        .take(limit)
+        .map(|group| Mix {
+            name: group.name.to_owned(),
+            seed: group.seed.clone(),
+        })
+        .collect()
+}
 
 /// What a candidate is matched against, gathered from the seed once so scoring it is a
 /// handful of set lookups.
@@ -223,4 +291,92 @@ fn artist_key(track: &Track) -> &str {
 
 fn normalize(name: &str) -> String {
     name.trim().to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::time::Duration;
+
+    use music::{ArtistRef, Track};
+
+    use super::seeds;
+
+    fn track(index: usize, artist: &str, artist_id: &str) -> Track {
+        Track {
+            id: Some(format!("track-{index}")),
+            name: format!("Track {index}"),
+            playable: true,
+            artists: artist.to_owned(),
+            artist_refs: vec![ArtistRef {
+                name: artist.to_owned(),
+                id: Some(artist_id.to_owned()),
+            }],
+            album: String::new(),
+            album_id: None,
+            cover: None,
+            duration: Duration::from_secs(180),
+            added_at: None,
+            added_by: None,
+            playcount: None,
+            popularity: 0,
+            explicit: false,
+            track_number: 0,
+            disc_number: 0,
+            tags: Vec::new(),
+            languages: Vec::new(),
+            credits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn seeds_group_by_artist_and_prefer_favorites() {
+        let tracks = vec![
+            track(0, "Solo", "a-solo"),
+            track(1, "Big", "a-big"),
+            track(2, "Big", "a-big"),
+            track(3, "Solo", "a-solo"),
+        ];
+        // Big has more tracks, but Solo holds the only favorite and leads.
+        let favorites = HashSet::from(["track-3".to_owned()]);
+
+        let mixes = seeds(&tracks, &favorites, 10);
+
+        assert_eq!(mixes.len(), 2);
+        assert_eq!(mixes[0].name, "Solo");
+        assert_eq!(mixes[0].seed.id.as_deref(), Some("track-3"));
+        assert_eq!(mixes[1].name, "Big");
+        assert_eq!(mixes[1].seed.id.as_deref(), Some("track-1"));
+    }
+
+    #[test]
+    fn seeds_skip_tracks_that_cannot_play_or_be_named() {
+        let mut unplayable = track(0, "Quiet", "a-quiet");
+        unplayable.playable = false;
+        let mut anonymous = track(1, "Unnamed", "a-unnamed");
+        anonymous.id = None;
+        let tracks = vec![unplayable, anonymous];
+
+        assert!(seeds(&tracks, &HashSet::new(), 10).is_empty());
+    }
+
+    #[test]
+    fn seeds_honor_the_limit() {
+        let tracks: Vec<Track> = (0..20)
+            .map(|index| track(index, &format!("Artist {index}"), &format!("a-{index}")))
+            .collect();
+
+        let mixes = seeds(&tracks, &HashSet::new(), 5);
+
+        assert_eq!(mixes.len(), 5);
+    }
+
+    #[test]
+    fn seeds_fall_back_to_the_artists_line() {
+        let mut plain = track(0, "Duo Band", "");
+        plain.artist_refs = Vec::new();
+        let mixes = seeds(&[plain], &HashSet::new(), 10);
+
+        assert_eq!(mixes[0].name, "Duo Band");
+    }
 }

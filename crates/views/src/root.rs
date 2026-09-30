@@ -44,6 +44,9 @@ struct Screens {
     playlist_detail: Option<Entity<Detail>>,
     search: Entity<SearchView>,
     genres: Entity<Genres>,
+    /// The local shelf's genres, derived from the files' tags; the genre page updates it the
+    /// same way it does the streaming one.
+    local_genres: Entity<Genres>,
     genre: Option<Entity<GenreView>>,
     genre_detail: Option<Entity<GenreDetails>>,
     settings: Entity<SettingsView>,
@@ -129,20 +132,31 @@ impl Root {
         })
         .detach();
 
+        let io = Io::global(cx);
+        let genres = cx.new(|cx| Genres::new(session.clone(), io.clone(), Shelf::Streaming, cx));
+        let local_genres = cx.new(|cx| Genres::new(session.clone(), io.clone(), Shelf::Local, cx));
+
         let library_view = cx.new(|cx| {
             LibraryView::new(
                 Shelf::Streaming,
                 library.clone(),
                 playback.clone(),
+                genres.clone(),
                 window,
                 cx,
             )
         });
         let local_view = cx.new(|cx| {
-            LibraryView::new(Shelf::Local, library.clone(), playback.clone(), window, cx)
+            LibraryView::new(
+                Shelf::Local,
+                library.clone(),
+                playback.clone(),
+                local_genres.clone(),
+                window,
+                cx,
+            )
         });
 
-        let io = Io::global(cx);
         let home_state = cx.new(|cx| Home::new(library.clone(), session.clone(), io.clone(), cx));
         let home = cx.new(|cx| HomeView::new(home_state, playback.clone(), cx));
         let history = Sonora::global(cx).history.clone();
@@ -151,7 +165,6 @@ impl Root {
         let search_library = library.clone();
 
         let queries = cx.new(|cx| Search::new(session.clone(), search_library, io.clone(), cx));
-        let genres = cx.new(|cx| Genres::new(session.clone(), io.clone(), cx));
         let search = cx.new(|cx| SearchView::new(queries, genres.clone(), playback.clone(), cx));
 
         let settings = cx.new(|cx| SettingsView::new(session.clone(), playback.clone(), cx));
@@ -273,6 +286,7 @@ impl Root {
                 playlist_detail: None,
                 search,
                 genres,
+                local_genres,
                 genre: None,
                 genre_detail: None,
                 settings,
@@ -315,8 +329,16 @@ impl Root {
         }
 
         let genres = self.screens.genres.clone();
-        let detail =
-            cx.new(|cx| GenreDetails::new(self.session.clone(), genres, self.io.clone(), cx));
+        let local_genres = self.screens.local_genres.clone();
+        let detail = cx.new(|cx| {
+            GenreDetails::new(
+                self.session.clone(),
+                genres,
+                local_genres,
+                self.io.clone(),
+                cx,
+            )
+        });
         let view = cx.new(|cx| GenreView::new(detail.clone(), self.playback.clone(), cx));
         self.screens.genre = Some(view.clone());
         self.screens.genre_detail = Some(detail.clone());
