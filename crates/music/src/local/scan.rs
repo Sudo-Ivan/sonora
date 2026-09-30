@@ -338,7 +338,7 @@ fn group_albums(parsed: &[Tagged]) -> Vec<Album> {
                 .map(|&i| &parsed[i].album_artists)
                 .find(|artists| !artists.is_empty())
                 .cloned()
-                .unwrap_or_else(|| vec![wire::artist_ref(&wire::shared_artists(&tracks))]);
+                .unwrap_or_else(|| wire::shared_artists(&tracks));
             let name = tracks[0].album.clone();
             let year = album_year(indices, parsed);
             let release = indices

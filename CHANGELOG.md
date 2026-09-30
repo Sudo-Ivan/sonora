@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Add or remove individual artists with the + button in the local metadata editor.
+  Each artist name stays intact, including commas, ampersands and featuring text.
+
 ### Changed
 
 - The Mixes page and the library-based Quick picks now deal once a day instead of dealing

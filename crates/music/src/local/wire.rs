@@ -47,18 +47,6 @@ const ARTIST_NAMES: &[&str] = &[
     "cover.webp",
 ];
 
-/// What separates one artist from the next in a track's credit, matched without regard to case.
-/// An ampersand is left alone because it is as often part of one name as a join of two.
-const CREDIT_MARKS: &[&str] = &[
-    " featuring ",
-    " feat. ",
-    " feat ",
-    " ft. ",
-    " ft ",
-    ",",
-    ";",
-];
-
 /// The credit of an album whose tracks name no album artist and share no artist either.
 const VARIOUS_ARTISTS: &str = "Various Artists";
 
@@ -216,6 +204,7 @@ fn clean(value: Option<Cow<'_, str>>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+/// Reads each nonempty tag value as one name, preserving its punctuation and internal spacing.
 fn clean_multiple<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
     values
         .filter_map(|value| clean(Some(Cow::Borrowed(value))))
@@ -672,49 +661,41 @@ pub fn album_from_tracks(
     }
 }
 
-/// The artists every track credits, in the order the first track lists them, for an album whose
-/// files name no album artist. Credits split on commas, semicolons and featuring marks, and
-/// tracks that share nobody are credited to various artists.
-pub fn shared_artists(tracks: &[Track]) -> String {
+/// The artists every track credits, in the first track's order. Tracks sharing nobody are
+/// credited to various artists; display credits never need to be split again.
+pub fn shared_artists(tracks: &[Track]) -> Vec<ArtistRef> {
     let Some((first, rest)) = tracks.split_first() else {
-        return VARIOUS_ARTISTS.to_owned();
+        return vec![artist_ref(VARIOUS_ARTISTS)];
     };
     let others: Vec<HashSet<String>> = rest
         .iter()
         .map(|track| {
-            credited(&track.artists)
+            track
+                .artist_refs
                 .iter()
-                .map(|name| normalize(name))
+                .map(|artist| normalize(&artist.name))
                 .collect()
         })
         .collect();
-    let shared: Vec<String> = credited(&first.artists)
-        .into_iter()
-        .filter(|name| {
+    let shared: Vec<ArtistRef> = first
+        .artist_refs
+        .iter()
+        .filter(|artist| {
             others
                 .iter()
-                .all(|credits| credits.contains(&normalize(name)))
+                .all(|credits| credits.contains(&normalize(&artist.name)))
         })
+        .cloned()
         .collect();
     match shared.is_empty() {
-        true => VARIOUS_ARTISTS.to_owned(),
-        false => shared.join(", "),
+        true => vec![artist_ref(VARIOUS_ARTISTS)],
+        false => shared,
     }
 }
 
-/// Splits one track's artist credit into the names it lists.
-fn credited(artists: &str) -> Vec<String> {
-    let mut text = format!(" {} ", artists.replace(['(', ')', '[', ']'], " "));
-    for mark in CREDIT_MARKS {
-        while let Some(at) = text.to_ascii_lowercase().find(mark) {
-            text.replace_range(at..at + mark.len(), "\n");
-        }
-    }
-    text.split('\n')
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .collect()
+/// The individual track artists, preferring ARTISTS over ARTIST without splitting any value.
+pub(super) fn artists(tag: &Tag) -> Vec<String> {
+    one_or_many(Some(tag), Field::TrackArtist)
 }
 
 /// The folder an untagged track's album is keyed by. A disc folder such as `CD1` or `Disc 2`
