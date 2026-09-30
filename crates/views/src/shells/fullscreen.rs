@@ -100,7 +100,7 @@ pub struct FullscreenView {
     focus: FocusHandle,
     visualizer: VisualizerDrive,
     root_bounds: Rc<Cell<Bounds<Pixels>>>,
-    artwork_bounds: Rc<Cell<Bounds<Pixels>>>,
+    meta_bounds: Rc<Cell<Bounds<Pixels>>>,
 }
 
 impl FullscreenView {
@@ -155,7 +155,7 @@ impl FullscreenView {
             focus: cx.focus_handle(),
             visualizer: VisualizerDrive::default(),
             root_bounds: Rc::new(Cell::new(Bounds::default())),
-            artwork_bounds: Rc::new(Cell::new(Bounds::default())),
+            meta_bounds: Rc::new(Cell::new(Bounds::default())),
         };
         this.stir(cx);
         this
@@ -370,7 +370,6 @@ impl FullscreenView {
             .is_some_and(music::is_local_id)
             || small.as_ref().is_some_and(|url| url.starts_with("file://"));
         let waiting = !local && album.is_some() && cover_large.is_none();
-        let artwork_bounds = self.artwork_bounds.clone();
 
         div()
             .id("fullscreen-artwork")
@@ -381,14 +380,6 @@ impl FullscreenView {
                 this.cursor_pointer()
                     .on_click(move |_, _, cx| open_album(&album, cx))
             })
-            .child(
-                canvas(
-                    move |bounds, _, _| artwork_bounds.set(bounds),
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .size_full(),
-            )
             .child(
                 div()
                     .absolute()
@@ -445,6 +436,7 @@ impl FullscreenView {
         let album = track.as_ref().and_then(|track| track.album_id.clone());
         let explicit = track.as_ref().is_some_and(|track| track.explicit);
         let held = track.clone();
+        let meta_bounds = self.meta_bounds.clone();
         let trailing = |track: Option<music::Track>, cx: &App| {
             div()
                 .flex()
@@ -473,6 +465,11 @@ impl FullscreenView {
             .w_full()
             .min_w_0()
             .top(lift)
+            .child(
+                canvas(move |bounds, _, _| meta_bounds.set(bounds), |_, _, _, _| {})
+                    .absolute()
+                    .size_full(),
+            )
             .child(
                 // Three-part row with equal flex sides, so the title stays truly centred:
                 // the heart and the explicit badge live in the right cell and never shift it.
@@ -1112,8 +1109,10 @@ impl Render for FullscreenView {
             None => self.visualizer.hide(),
         }
         let bottom = |bounds: Bounds<Pixels>| bounds.origin.y + bounds.size.height;
-        let visualizer_max = (bottom(self.root_bounds.get()) - bottom(self.artwork_bounds.get()))
-            .max(px(VISUALIZER_MIN));
+        // The peaks stop an inset short of the artist line, so the glow never reaches the text.
+        let visualizer_max =
+            (bottom(self.root_bounds.get()) - bottom(self.meta_bounds.get()) - theme.metrics.inset)
+                .max(px(VISUALIZER_MIN));
         let root_bounds = self.root_bounds.clone();
 
         div()
