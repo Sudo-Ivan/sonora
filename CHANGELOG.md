@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.6] - 2026-09-30
+
 ### Added
 
 - Favorites, Mixes and Genres tabs under Library and Local Music. Favorites lists the shelf's
