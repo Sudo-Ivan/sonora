@@ -40,6 +40,9 @@ const OPEN_COALESCE: Duration = Duration::from_millis(250);
 fn main() {
     memory::tune();
     memory::cap_pools();
+    if let Some(code) = webview::probed() {
+        exit(code);
+    }
     logging::init();
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
