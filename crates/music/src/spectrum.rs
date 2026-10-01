@@ -23,6 +23,11 @@ const IDLE_POLL: Duration = Duration::from_millis(4);
 /// The poll the analyzer drops to while nobody watches the spectrum. The windows still get
 /// drained at that rate, so a watcher that shows up hears live audio within a frame or two.
 const IDLE_UNWATCHED: Duration = Duration::from_millis(64);
+/// How long the analyzer sleeps on an empty ring once it has been empty for `QUIET_AFTER` polls
+/// in a row. Paused or stopped, the tap stays silent for hours, and waking every few
+/// milliseconds through that buys nothing. The ring holds far more than this much audio.
+const QUIET_POLL: Duration = Duration::from_millis(50);
+const QUIET_AFTER: u32 = 250;
 
 /// The band levels of one channel, published by the analyzer thread and read by the UI.
 #[derive(Clone)]
@@ -260,6 +265,7 @@ fn analyze(mut consumer: rtrb::Consumer<f32>, format: Arc<Format>, spectrum: Spe
     let mut frame = vec![0f32; channels];
     let mut lane_index = 0usize;
     let mut buffer = vec![Complex32::default(); FFT_SIZE];
+    let mut empty = 0u32;
 
     loop {
         // With nobody looking, the analyzer's whole job is keeping the ring from backing
@@ -285,12 +291,17 @@ fn analyze(mut consumer: rtrb::Consumer<f32>, format: Arc<Format>, spectrum: Spe
             if consumer.is_abandoned() {
                 return;
             }
-            std::thread::sleep(IDLE_POLL);
+            empty = empty.saturating_add(1);
+            std::thread::sleep(match empty > QUIET_AFTER {
+                true => QUIET_POLL,
+                false => IDLE_POLL,
+            });
             continue;
         }
         let Ok(chunk) = consumer.read_chunk(slots) else {
             continue;
         };
+        empty = 0;
         for &sample in chunk.as_slices().0.iter().chain(chunk.as_slices().1) {
             // A new track can bring a new format. Grouping the samples by the wrong channel
             // count stretches a window over several frames' worth of audio, so the levels move
