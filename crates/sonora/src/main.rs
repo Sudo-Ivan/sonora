@@ -38,7 +38,7 @@ const FIRST_SIZE: Size<Pixels> = size(px(920.), px(640.));
 const OPEN_COALESCE: Duration = Duration::from_millis(250);
 
 fn main() {
-    memory::cap_arenas();
+    memory::tune();
     memory::cap_pools();
     logging::init();
 
