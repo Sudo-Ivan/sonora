@@ -1,6 +1,7 @@
 mod language;
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{LazyLock, RwLock};
 
@@ -12,7 +13,10 @@ pub use fluent_bundle::FluentArgs;
 pub use language::{AUTO, Language, resolve};
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
-static BUNDLES: LazyLock<Vec<FluentBundle<FluentResource>>> = LazyLock::new(build);
+/// One bundle per locale, each parsed the first time a lookup needs it. An ordinary run only
+/// ever parses the active language and the English fallback.
+static BUNDLES: [OnceLock<FluentBundle<FluentResource>>; Language::ALL.len()] =
+    [const { OnceLock::new() }; Language::ALL.len()];
 /// The resolved text of every key already asked for without arguments, per language. Most
 /// `t!` calls are that kind, and this is what keeps a render from paying a Fluent lookup
 /// and a fresh String for each one. `set` drops it when the language changes.
@@ -124,7 +128,9 @@ fn format(language: Language, key: &str, args: Option<&FluentArgs>) -> Option<Sh
         return Some(text);
     }
 
-    let bundle = BUNDLES.get(language as usize)?;
+    let bundle = BUNDLES
+        .get(language as usize)?
+        .get_or_init(|| bundle(language));
     let pattern = bundle.get_message(key)?.value()?;
 
     let mut errors = Vec::new();
@@ -142,10 +148,6 @@ fn format(language: Language, key: &str, args: Option<&FluentArgs>) -> Option<Sh
             .insert(key.to_owned(), text.clone());
     }
     Some(text)
-}
-
-fn build() -> Vec<FluentBundle<FluentResource>> {
-    Language::ALL.into_iter().map(bundle).collect()
 }
 
 fn bundle(language: Language) -> FluentBundle<FluentResource> {
