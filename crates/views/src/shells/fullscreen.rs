@@ -1114,6 +1114,11 @@ impl Render for FullscreenView {
             (bottom(self.root_bounds.get()) - bottom(self.meta_bounds.get()) - theme.metrics.inset)
                 .max(px(VISUALIZER_MIN));
         let root_bounds = self.root_bounds.clone();
+        // The visualizer and its veil sit flush with the window's bottom corners.
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let corner = crate::chrome::window_radius(self.settings.read(cx), cx);
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let corner: Option<Pixels> = None;
 
         div()
             .id("fullscreen")
@@ -1143,6 +1148,7 @@ impl Render for FullscreenView {
                 this.child(
                     Visualizer::new(self.visualizer.levels(), visualizer_max)
                         .style_kind(style)
+                        .when_some(corner, |this, radius| this.corner_radius(radius))
                         .absolute()
                         .left_0()
                         .right_0()
@@ -1168,6 +1174,7 @@ impl Render for FullscreenView {
                             band,
                             VEIL_BLUR,
                             theme.background,
+                            corner,
                             window,
                         )),
                 )

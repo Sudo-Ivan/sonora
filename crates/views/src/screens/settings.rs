@@ -4094,6 +4094,7 @@ impl Render for SettingsHeader {
                     height,
                     HEADER_BLUR,
                     theme.background,
+                    None,
                     window,
                 ))
             })
