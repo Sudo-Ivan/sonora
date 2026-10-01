@@ -4227,6 +4227,7 @@ dependencies = [
  "serde_norway",
  "storage",
  "symphonia",
+ "tempfile",
  "tokio",
  "webpki-roots",
  "wiremock",

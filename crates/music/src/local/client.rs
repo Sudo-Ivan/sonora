@@ -777,7 +777,7 @@ mod tests {
             artists: vec![],
         };
 
-        let client = LocalClient::new(scanned, db.clone(), dir.clone(), index);
+        let client = LocalClient::new(scanned, db.clone(), index);
 
         // Star track 0 and 1
         client.set_track_saved("local:0", true).await.unwrap();
@@ -838,7 +838,7 @@ mod tests {
         let db = Database::at(dir.join("state.sqlite"));
         let cache = storage::Cache::at(dir.join("cache.sqlite"));
         let index = Index::new(cache);
-        (LocalClient::new(scanned, db, dir.clone(), index), dir)
+        (LocalClient::new(scanned, db, index), dir)
     }
 
     #[tokio::test]
@@ -853,6 +853,7 @@ mod tests {
             tracks,
             albums: Vec::new(),
             portraits: HashMap::new(),
+            artists: Vec::new(),
         });
 
         let genres = client.genres().await.unwrap();
@@ -887,6 +888,7 @@ mod tests {
                 test_album("local-album:c"),
             ],
             portraits: HashMap::new(),
+            artists: Vec::new(),
         });
 
         let detail = client.genre("local-genre:rock").await.unwrap();
@@ -918,6 +920,7 @@ mod tests {
             tracks: vec![tagged_track("local:0", &["Rock"], None, None)],
             albums: Vec::new(),
             portraits: HashMap::new(),
+            artists: Vec::new(),
         });
 
         let detail = client.genre("local-genre:ska").await.unwrap();

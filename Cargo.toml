@@ -150,13 +150,13 @@ sha2 = "0.10"
 souvlaki = "0.8"
 sys-locale = "0.3"
 symphonia = { version = "0.5.5", default-features = false, features = ["mkv", "ogg", "isomp4"] }
+tempfile = "3.27"
 tray-icon = { version = "0.24", default-features = false }
 unic-langid = { version = "0.9", features = ["macros"] }
 unicode-segmentation = "1.12"
 
 percent-encoding = "2.3"
 proptest = "1.9"
-tempfile = "3"
 wiremock = "0.6"
 opensubsonic = "0.4.0"
 tokio = { version = "1.53", features = [
