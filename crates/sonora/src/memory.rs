@@ -52,6 +52,10 @@ pub fn cap_pools() {
 /// session's working set, so the flush only runs when something is genuinely bloated.
 const PRESSURE: usize = 768 * 1024 * 1024;
 
+/// Gives freed heap and clean file pages back to the kernel every `INTERVAL`, but only while
+/// nobody is watching the window. A trim holds a malloc arena locked while it walks the heap and
+/// every page it returns faults back in on the next allocation, so a trim under an animating
+/// window drops frames. Work skipped while the window is watched waits for the next quiet tick.
 pub fn watch(cx: &mut App) {
     cx.spawn(async move |cx| {
         let started = Instant::now();
@@ -93,6 +97,9 @@ pub fn watch(cx: &mut App) {
                     report(probed, cx);
                 }
             });
+            if cx.update(|cx| Sonora::global(cx).wake.read(cx).watched()) {
+                continue;
+            }
             let shedding = started.elapsed() >= shed_at;
             if shedding {
                 shed_at = sheds
