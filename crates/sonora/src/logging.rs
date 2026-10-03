@@ -61,12 +61,16 @@ fn catch_panics() {
     }));
 }
 
+/// How much log the writer holds before a syscall: debug filters make every record one,
+/// so a buffer is the difference between a write per line and a write per page.
+const BUFFER: usize = 64 * 1024;
+
 /// The log file under the size limit: a write that would carry it past `LIMIT` rotates it
 /// first and lands in a fresh file, so a flood of lines churns through the two files instead
 /// of filling the disk.
 struct Capped {
     path: PathBuf,
-    file: File,
+    file: io::BufWriter<File>,
     written: u64,
 }
 
@@ -74,9 +78,10 @@ impl Write for Capped {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let overflowing = self.written + buf.len() as u64 > LIMIT;
         if overflowing && self.written > 0 {
+            self.file.flush()?;
             rotate(&self.path);
             if let Some(file) = append(&self.path) {
-                self.file = file;
+                self.file = io::BufWriter::with_capacity(BUFFER, file);
                 self.written = 0;
             }
         }
@@ -124,7 +129,7 @@ fn open() -> Option<Capped> {
     let written = file.metadata().map(|file| file.len()).unwrap_or(0);
     Some(Capped {
         path,
-        file,
+        file: io::BufWriter::with_capacity(BUFFER, file),
         written,
     })
 }
