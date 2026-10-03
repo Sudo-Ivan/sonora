@@ -5,6 +5,19 @@ use state::Sonora;
 
 const INTERVAL: Duration = Duration::from_secs(30);
 
+/// Caps the allocator's arena count. Must run before any worker threads start: glibc spreads
+/// allocations over up to eight arenas per core and free space inside an arena only reaches
+/// the kernel in large contiguous pieces, so a many-threaded session parks freed memory in
+/// dozens of heaps that `malloc_trim` alone does not reclaim well. A handful of arenas is
+/// still plenty of allocation parallelism for this workload.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub fn cap_arenas() {
+    unsafe { libc::mallopt(libc::M_ARENA_MAX, 4) };
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+pub fn cap_arenas() {}
+
 /// Resident bytes above which a tick acts rather than trims: the artwork cache is squeezed
 /// to its small resident set and the heap handed back to the allocator. Well past a healthy
 /// session's working set, so the flush only runs when something is genuinely bloated.

@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Long sessions use less memory: downloaded tracks no longer hold spare buffer space, the
+  lyrics cache is bounded, and the allocator is asked to keep fewer heaps per thread.
+
 ## [0.42.6] - 2026-09-30
 
 ### Added
