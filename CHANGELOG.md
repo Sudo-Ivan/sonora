@@ -13,6 +13,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Long sessions use less memory: downloaded tracks no longer hold spare buffer space, the
   lyrics cache is bounded, and the allocator is asked to keep fewer heaps per thread.
+- Fewer background threads: the gpui dispatcher's worker pool is capped at 8 instead of one
+  per core.
 
 ## [0.42.6] - 2026-09-30
 
