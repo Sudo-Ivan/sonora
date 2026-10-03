@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The spectrum analyzer no longer works a sample at a time on either end, which drops its
+  cost during playback to nearly nothing while the visualizer is out of sight.
+
 ## [0.42.8] - 2026-10-03
 
 ### Changed
