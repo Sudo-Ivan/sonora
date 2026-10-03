@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.8] - 2026-10-03
+
 ### Changed
 
 - Mixes now gather related artists, the way Spotify's daily mixes do: the shelf's artists
@@ -15,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   them, and weighs what was played lately against what was never heard.
 - The forever queue walks the library by taste and artist affinity out from the current
   track instead of picking unheard tracks at random.
+- Less idle work: the spectrum analyzer skips its FFT pass while the visualizer is out of
+  sight, and the pools behind dbus and parallel work default to 8 threads unless set.
+- The log file is written in batches rather than a line at a time, and already-translated
+  strings are reused instead of resolved anew on every frame.
 
 ## [0.42.7] - 2026-10-03
 
