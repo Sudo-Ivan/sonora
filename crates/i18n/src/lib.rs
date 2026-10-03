@@ -1,7 +1,8 @@
 mod language;
 
-use std::sync::LazyLock;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, RwLock};
 
 use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentResource, FluentValue};
@@ -12,6 +13,11 @@ pub use language::{AUTO, Language, resolve};
 
 static ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static BUNDLES: LazyLock<Vec<FluentBundle<FluentResource>>> = LazyLock::new(build);
+/// The resolved text of every key already asked for without arguments, per language. Most
+/// `t!` calls are that kind, and this is what keeps a render from paying a Fluent lookup
+/// and a fresh String for each one. `set` drops it when the language changes.
+static CACHE: LazyLock<RwLock<HashMap<usize, HashMap<String, SharedString>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 pub trait Value<'a> {
     fn value(self) -> FluentValue<'a>;
@@ -71,6 +77,10 @@ pub fn language() -> Language {
 
 pub fn set(language: Language) {
     ACTIVE.store(language as usize, Ordering::Relaxed);
+    CACHE
+        .write()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .clear();
 }
 
 pub fn lookup(key: &str, args: Option<&FluentArgs>) -> SharedString {
@@ -102,6 +112,18 @@ pub fn translate(key: &str) -> SharedString {
 }
 
 fn format(language: Language, key: &str, args: Option<&FluentArgs>) -> Option<SharedString> {
+    let cached = args.is_none();
+    if cached
+        && let Some(text) = CACHE
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .get(&(language as usize))
+            .and_then(|texts| texts.get(key))
+            .cloned()
+    {
+        return Some(text);
+    }
+
     let bundle = BUNDLES.get(language as usize)?;
     let pattern = bundle.get_message(key)?.value()?;
 
@@ -110,7 +132,16 @@ fn format(language: Language, key: &str, args: Option<&FluentArgs>) -> Option<Sh
     for error in &errors {
         log::warn!("i18n: cannot format {key}: {error}");
     }
-    Some(SharedString::from(text.into_owned()))
+    let text = SharedString::from(text.into_owned());
+    if cached {
+        CACHE
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .entry(language as usize)
+            .or_default()
+            .insert(key.to_owned(), text.clone());
+    }
+    Some(text)
 }
 
 fn build() -> Vec<FluentBundle<FluentResource>> {
