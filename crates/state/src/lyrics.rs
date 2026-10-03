@@ -21,6 +21,10 @@ pub enum LyricsState {
 }
 
 const SAVE_DELAY: Duration = Duration::from_millis(800);
+/// How many tracks' lyrics the session cache holds. Each entry is whole sheets of text, so a
+/// long session would otherwise keep every song it ever played. The store on disk is the real
+/// cache; this only spares a read of it, so trimming keeps just the track on screen.
+const CACHE_MAX: usize = 128;
 
 pub struct Lyrics {
     state: LyricsState,
@@ -195,8 +199,18 @@ impl Lyrics {
         }
         let (hits, instrumental) = self.store.get(&self.key(id, cx), &self.known(cx))?;
         let found = Found { hits, instrumental };
-        self.cache.insert(id.to_owned(), found.clone());
+        self.hold(id.to_owned(), found.clone());
         Some(found)
+    }
+
+    /// Files one track's answer, letting go of everything but what is on screen once the map
+    /// has grown past `CACHE_MAX`.
+    fn hold(&mut self, id: String, found: Found) {
+        if self.cache.len() >= CACHE_MAX && !self.cache.contains_key(&id) {
+            let keep = self.following.clone();
+            self.cache.retain(|id, _| Some(id) == keep.as_ref());
+        }
+        self.cache.insert(id, found);
     }
 
     fn key(&self, id: &str, cx: &Context<Self>) -> String {
@@ -513,7 +527,7 @@ impl Lyrics {
                 self.store.put(self.key(&id, cx), &kept, instrumental);
                 self.schedule_save(cx);
             }
-            self.cache.insert(
+            self.hold(
                 id,
                 Found {
                     hits: kept,
