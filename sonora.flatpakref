@@ -1,0 +1,10 @@
+[Flatpak Ref]
+Name=io.github.sudo_ivan.sonora
+Branch=stable
+Title=Sonora
+Url=https://sudo-ivan.github.io/sonora/repo
+SuggestRemoteName=sonora
+Homepage=https://github.com/Sudo-Ivan/sonora
+RuntimeRepo=https://dl.flathub.org/repo/flathub.flatpakrepo
+IsRuntime=false
+GPGKey=mDMEarxFZBYJKwYBBAHaRw8BAQdAFobUITaX2txsIGo9KUBu2+pPx9nJxMxxGqkvQs/mzSa0N1Nvbm9yYSBGbGF0cGFrIFJlcG9zaXRvcnkgPG5vcmVwbHlAc3Vkby1pdmFuLmdpdGh1Yi5pbz6IkAQTFgoAOBYhBKBmxDoGDZvIP6VY3uokIX5uczgJBQJqvEVkAhsDBQsJCAcCBhUKCQgLAgQWAgMBAh4BAheAAAoJEOokIX5uczgJVMsBAJPghu+RZRKRwM4GjI226tAP7bJxIU5C2zCfOpeAGSTPAQCRd5WNp+m34MAbeIOltj3ePx4xsyfk86+Pb9db3vkGCA==
