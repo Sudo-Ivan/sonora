@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.7] - 2026-10-03
+
 ### Changed
 
 - Long sessions use less memory: downloaded tracks no longer hold spare buffer space, the
