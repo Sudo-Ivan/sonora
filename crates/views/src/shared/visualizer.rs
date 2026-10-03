@@ -20,6 +20,8 @@ struct State {
     armed: bool,
     visible: bool,
     beat: Option<Instant>,
+    /// The spectrum last shown, so `hide` can also turn its analyzer's transforms off.
+    spectrum: Option<Spectrum>,
 }
 
 #[derive(Clone, Default)]
@@ -33,8 +35,10 @@ impl VisualizerDrive {
     }
 
     pub fn show(&self, watch: EntityId, spectrum: Spectrum, window: &mut Window) {
+        spectrum.set_watched(true);
         let mut state = self.state.borrow_mut();
         state.visible = true;
+        state.spectrum = Some(spectrum.clone());
         if state.armed {
             return;
         }
@@ -47,7 +51,11 @@ impl VisualizerDrive {
     }
 
     pub fn hide(&self) {
-        self.state.borrow_mut().visible = false;
+        let mut state = self.state.borrow_mut();
+        state.visible = false;
+        if let Some(spectrum) = &state.spectrum {
+            spectrum.set_watched(false);
+        }
     }
 
     fn step(&self, watch: EntityId, spectrum: Spectrum, window: &mut Window, cx: &mut App) {

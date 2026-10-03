@@ -20,6 +20,9 @@ const KNEE: f32 = 0.6;
 const ATTACK: f32 = 0.9;
 const DECAY: f32 = 0.12;
 const IDLE_POLL: Duration = Duration::from_millis(4);
+/// The poll the analyzer drops to while nobody watches the spectrum. The windows still get
+/// drained at that rate, so a watcher that shows up hears live audio within a frame or two.
+const IDLE_UNWATCHED: Duration = Duration::from_millis(64);
 
 /// The band levels of one channel, published by the analyzer thread and read by the UI.
 #[derive(Clone)]
@@ -54,6 +57,9 @@ pub struct Spectrum {
     right: Lane,
     /// Whether the taps hear the track before the user's volume rather than after it.
     absolute: Arc<AtomicBool>,
+    /// Whether anything reads the bands. The analyzer skips its transforms while this is
+    /// off, so a hidden visualizer costs a drain and no FFT.
+    watched: Arc<AtomicBool>,
 }
 
 impl Spectrum {
@@ -62,6 +68,7 @@ impl Spectrum {
             left: Lane::new(),
             right: Lane::new(),
             absolute: Arc::new(AtomicBool::new(false)),
+            watched: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -69,6 +76,12 @@ impl Spectrum {
     /// stop following it. The taps pick the change up at the next frame.
     pub fn set_absolute(&self, absolute: bool) {
         self.absolute.store(absolute, Ordering::Relaxed);
+    }
+
+    /// Tells the analyzer somebody reads the bands or nobody does, set from whatever shows
+    /// the spectrum. With no watcher the windows are still drained, just not transformed.
+    pub fn set_watched(&self, watched: bool) {
+        self.watched.store(watched, Ordering::Relaxed);
     }
 
     /// The left channel's bands.
@@ -219,7 +232,10 @@ fn analyze(mut consumer: rtrb::Consumer<f32>, format: Arc<Format>, spectrum: Spe
             Ok(sample) => sample,
             Err(PopError::Empty) if consumer.is_abandoned() => return,
             Err(PopError::Empty) => {
-                std::thread::sleep(IDLE_POLL);
+                std::thread::sleep(match spectrum.watched.load(Ordering::Relaxed) {
+                    true => IDLE_POLL,
+                    false => IDLE_UNWATCHED,
+                });
                 continue;
             }
         };
@@ -261,6 +277,11 @@ fn analyze(mut consumer: rtrb::Consumer<f32>, format: Arc<Format>, spectrum: Spe
             continue;
         }
         filled = 0;
+        // A window nobody reads is dropped, not transformed: the visualizer is off or out
+        // of sight, and the bands would only freeze at what was last published anyway.
+        if !spectrum.watched.load(Ordering::Relaxed) {
+            continue;
+        }
 
         for side in sides.iter_mut() {
             for ((slot, sample), weight) in buffer.iter_mut().zip(side.samples).zip(&window) {
