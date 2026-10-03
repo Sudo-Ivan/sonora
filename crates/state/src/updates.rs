@@ -52,7 +52,7 @@ impl Updates {
         let mut updates = Self {
             state: UpdateState::Quiet,
             settings,
-            http: reqwest::Client::new(),
+            http: music::tls::client(),
             io,
             task: None,
         };

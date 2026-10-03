@@ -115,7 +115,7 @@ impl DeezerClient {
     /// Signs in with an `arl` cookie: fetches the user data (which validates the cookie) and
     /// the stream secret. An invalid or expired arl answers a user id of 0.
     pub async fn connect(arl: &str) -> Result<Self> {
-        let http = reqwest::Client::builder()
+        let http = crate::tls::builder()
             .user_agent("Mozilla/5.0 (X11; Linux x86_64; rv:142.0) Gecko/20100101 Firefox/142.0")
             .build()
             .context("cannot build the deezer http client")?;

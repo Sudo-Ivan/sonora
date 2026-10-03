@@ -63,7 +63,7 @@ pub fn authority(url: &str) -> Option<&str> {
 /// authority verifies exactly as it always did.
 #[derive(Debug)]
 struct RegistryVerifier {
-    inner: rustls_platform_verifier::Verifier,
+    inner: Arc<rustls::client::WebPkiServerVerifier>,
 }
 
 impl rustls::client::danger::ServerCertVerifier for RegistryVerifier {
@@ -105,11 +105,24 @@ impl rustls::client::danger::ServerCertVerifier for RegistryVerifier {
     }
 }
 
-/// The rustls config carrying the registry-aware verifier, or a plain error when the platform
+/// The rustls config carrying the registry-aware verifier, or a plain error when the
 /// verifier cannot be built at all, in which case callers fall back to reqwest defaults.
+/// The bundled Mozilla roots verify inside a sandbox that offers no usable store, and the
+/// platform's own load rides on top so a CA the user or their employer added still counts.
 fn config() -> anyhow::Result<rustls::ClientConfig> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = rustls_platform_verifier::Verifier::new(provider.clone())?;
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let loaded = rustls_native_certs::load_native_certs();
+    let (added, ignored) = roots.add_parsable_certificates(loaded.certs);
+    for error in loaded.errors {
+        log::debug!("tls: a platform root was skipped: {error}");
+    }
+    log::debug!("tls: {added} platform roots joined the bundled set, {ignored} ignored");
+
+    let verifier =
+        rustls::client::WebPkiServerVerifier::builder_with_provider(roots.into(), provider.clone())
+            .build()?;
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?
         .dangerous()
