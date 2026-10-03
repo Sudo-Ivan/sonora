@@ -99,6 +99,10 @@ impl<B: Body> Shared<B> {
         if let Ok(mut state) = self.state.lock() {
             let Buffered { buf, body, .. } = &mut *state;
             body.flush(buf);
+            // Whatever the announcement got wrong, or a body reshaped, leaves as spare
+            // capacity only while the download is live: the track now keeps exactly the
+            // bytes it is.
+            buf.shrink_to_fit();
             if state.failed.is_none() {
                 state.failed = failed;
             }
@@ -130,9 +134,18 @@ impl<B: Body> Stream<B> {
     /// of them are gone.
     pub fn new(response: reqwest::Response, body: B) -> Self {
         let total = response.content_length();
+        // Right-sizing the buffer up front spares the whole download the copying of a Vec
+        // doubling again and again, and keeps a track from sitting on twice its size in
+        // unused capacity afterwards. `try_reserve` because a wrong Content-Length must not
+        // be able to abort the process.
+        let mut buf = Vec::new();
+        if let Some(total) = total {
+            buf.try_reserve(usize::try_from(total).unwrap_or(0).min(CEILING))
+                .ok();
+        }
         let shared = Arc::new(Shared {
             state: Mutex::new(Buffered {
-                buf: Vec::new(),
+                buf,
                 total,
                 complete: false,
                 failed: None,
