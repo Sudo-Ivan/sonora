@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::time::Duration;
 
-use rtrb::{PopError, RingBuffer};
+use rtrb::RingBuffer;
 use rustfft::FftPlanner;
 use rustfft::num_complex::Complex32;
 
@@ -121,6 +121,8 @@ impl Spectrum {
             producer,
             format,
             absolute: self.absolute.clone(),
+            stage: [0.; STAGE],
+            staged: 0,
         }
     }
 }
@@ -149,16 +151,25 @@ impl Format {
 
 /// Where the samples go in. It sits on the source's side of the mixer, so what it hears is the
 /// track's own rate and channel count, not the device's, and those can change with the track.
+/// Pushes are staged and handed to the ring in batches, since it runs inside the audio
+/// callback where a slot write and an atomic per sample adds up.
 pub struct Tap {
     producer: rtrb::Producer<f32>,
     format: Arc<Format>,
     absolute: Arc<AtomicBool>,
+    stage: [f32; STAGE],
+    staged: usize,
 }
+
+/// Samples held back for one `write_chunk`. At two channels of 48 kHz it is under three
+/// milliseconds of latency to the analyzer, far inside a visualizer's frame.
+const STAGE: usize = 256;
 
 impl Tap {
     /// Declares the format of the samples that follow. Call it before the first sample and on
     /// every change; the analyzer picks the change up at the next frame boundary.
-    pub fn format(&self, rate: u32, channels: u16) {
+    pub fn format(&mut self, rate: u32, channels: u16) {
+        self.flush();
         self.format.rate.store(rate, Ordering::Release);
         self.format.channels.store(channels, Ordering::Release);
     }
@@ -169,7 +180,30 @@ impl Tap {
     }
 
     pub fn push(&mut self, sample: f32) {
-        self.producer.push(sample).ok();
+        self.stage[self.staged] = sample;
+        self.staged += 1;
+        if self.staged == STAGE {
+            self.flush();
+        }
+    }
+
+    /// Commits the staged samples, or drops them when the ring has no room for the batch, the
+    /// way a lone sample was dropped before it. The slots go in uninitialized rather than
+    /// zeroed first, since every one of them is overwritten a copy later.
+    fn flush(&mut self) {
+        if self.staged == 0 {
+            return;
+        }
+        if let Ok(chunk) = self.producer.write_chunk_uninit(self.staged) {
+            chunk.fill_from_iter(self.stage[..self.staged].iter().copied());
+        }
+        self.staged = 0;
+    }
+}
+
+impl Drop for Tap {
+    fn drop(&mut self) {
+        self.flush();
     }
 }
 
@@ -228,83 +262,105 @@ fn analyze(mut consumer: rtrb::Consumer<f32>, format: Arc<Format>, spectrum: Spe
     let mut buffer = vec![Complex32::default(); FFT_SIZE];
 
     loop {
-        let sample = match consumer.pop() {
-            Ok(sample) => sample,
-            Err(PopError::Empty) if consumer.is_abandoned() => return,
-            Err(PopError::Empty) => {
-                std::thread::sleep(match spectrum.watched.load(Ordering::Relaxed) {
-                    true => IDLE_POLL,
-                    false => IDLE_UNWATCHED,
-                });
+        // With nobody looking, the analyzer's whole job is keeping the ring from backing
+        // up on the tap: the backlog is thrown away in one read rather than walked a
+        // sample at a time, then the thread sleeps past the next batch.
+        if !spectrum.watched.load(Ordering::Relaxed) {
+            match consumer.slots() {
+                0 if consumer.is_abandoned() => return,
+                0 => std::thread::sleep(IDLE_UNWATCHED),
+                slots => {
+                    if let Ok(chunk) = consumer.read_chunk(slots) {
+                        chunk.commit_all();
+                    }
+                }
+            }
+            lane_index = 0;
+            filled = 0;
+            continue;
+        }
+
+        let slots = consumer.slots();
+        if slots == 0 {
+            if consumer.is_abandoned() {
+                return;
+            }
+            std::thread::sleep(IDLE_POLL);
+            continue;
+        }
+        let Ok(chunk) = consumer.read_chunk(slots) else {
+            continue;
+        };
+        for &sample in chunk.as_slices().0.iter().chain(chunk.as_slices().1) {
+            // A new track can bring a new format. Grouping the samples by the wrong channel
+            // count stretches a window over several frames' worth of audio, so the levels move
+            // a few times a second and every band lands on the wrong frequency.
+            if lane_index == 0 {
+                let heard = format.read();
+                if heard != (rate, channels) {
+                    (rate, channels) = heard;
+                    edges = band_edges(rate as f32);
+                    frame = vec![0f32; channels];
+                    filled = 0;
+                }
+            }
+
+            frame[lane_index] = sample;
+            lane_index += 1;
+            if lane_index < channels {
                 continue;
             }
-        };
+            lane_index = 0;
 
-        // A new track can bring a new format. Grouping the samples by the wrong channel
-        // count stretches a window over several frames' worth of audio, so the levels move
-        // a few times a second and every band lands on the wrong frequency.
-        if lane_index == 0 {
-            let heard = format.read();
-            if heard != (rate, channels) {
-                (rate, channels) = heard;
-                edges = band_edges(rate as f32);
-                frame = vec![0f32; channels];
-                filled = 0;
-            }
-        }
-
-        frame[lane_index] = sample;
-        lane_index += 1;
-        if lane_index < channels {
-            continue;
-        }
-        lane_index = 0;
-
-        for (index, side) in sides.iter_mut().enumerate() {
-            let mut sum = 0.;
-            let mut taken = 0usize;
-            for sample in frame.iter().skip(index).step_by(2) {
-                sum += sample;
-                taken += 1;
-            }
-            side.samples[filled] = match taken {
-                0 => frame.iter().sum::<f32>() / channels as f32,
-                taken => sum / taken as f32,
-            };
-        }
-        filled += 1;
-        if filled < FFT_SIZE {
-            continue;
-        }
-        filled = 0;
-        // A window nobody reads is dropped, not transformed: the visualizer is off or out
-        // of sight, and the bands would only freeze at what was last published anyway.
-        if !spectrum.watched.load(Ordering::Relaxed) {
-            continue;
-        }
-
-        for side in sides.iter_mut() {
-            for ((slot, sample), weight) in buffer.iter_mut().zip(side.samples).zip(&window) {
-                *slot = Complex32::new(sample * weight, 0.);
-            }
-            fft.process(&mut buffer);
-
-            for (band, edge) in edges.windows(2).enumerate() {
-                let lo = edge[0];
-                let hi = edge[1].max(lo + 1);
-                let magnitude = buffer[lo..hi]
-                    .iter()
-                    .map(|bin| bin.norm())
-                    .fold(0f32, f32::max);
-                let target = soften((magnitude * GAIN / (FFT_SIZE as f32 / 2.)).sqrt());
-                let rate = match target > side.smoothed[band] {
-                    true => ATTACK,
-                    false => DECAY,
+            for (index, side) in sides.iter_mut().enumerate() {
+                let mut sum = 0.;
+                let mut taken = 0usize;
+                let mut at = index;
+                while at < channels {
+                    sum += frame[at];
+                    taken += 1;
+                    at += 2;
+                }
+                side.samples[filled] = match taken {
+                    0 => frame.iter().sum::<f32>() / channels as f32,
+                    _ => sum / taken as f32,
                 };
-                side.smoothed[band] += (target - side.smoothed[band]) * rate;
-                side.lane.set(band, side.smoothed[band]);
+            }
+            filled += 1;
+            if filled < FFT_SIZE {
+                continue;
+            }
+            filled = 0;
+            // A window nobody reads is dropped, not transformed: the visualizer is off or
+            // out of sight, and the bands would only freeze at what was last published anyway.
+            if !spectrum.watched.load(Ordering::Relaxed) {
+                continue;
+            }
+
+            for side in sides.iter_mut() {
+                for ((slot, sample), weight) in buffer.iter_mut().zip(side.samples).zip(&window) {
+                    *slot = Complex32::new(sample * weight, 0.);
+                }
+                fft.process(&mut buffer);
+
+                for (band, edge) in edges.windows(2).enumerate() {
+                    let lo = edge[0];
+                    let hi = edge[1].max(lo + 1);
+                    let magnitude = buffer[lo..hi]
+                        .iter()
+                        .map(|bin| bin.norm())
+                        .fold(0f32, f32::max);
+                    let target = soften((magnitude * GAIN / (FFT_SIZE as f32 / 2.)).sqrt());
+                    let rate = match target > side.smoothed[band] {
+                        true => ATTACK,
+                        false => DECAY,
+                    };
+                    side.smoothed[band] += (target - side.smoothed[band]) * rate;
+                    side.lane.set(band, side.smoothed[band]);
+                }
             }
         }
+        chunk.commit_all();
     }
 }
 

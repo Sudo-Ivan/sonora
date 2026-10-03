@@ -296,7 +296,7 @@ impl<I: Source> SmoothGain<I> {
 
         self.channels = channels;
         self.rate = rate;
-        if let Some(tap) = &self.tap {
+        if let Some(tap) = &mut self.tap {
             tap.format(rate, channels);
         }
         self.ramp_frames = (self.ramp.as_secs_f64() * rate as f64).round().max(1.0) as u32;
