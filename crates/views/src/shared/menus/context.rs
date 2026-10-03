@@ -3,7 +3,7 @@ use gpui::{App, ClickEvent, ClipboardItem, Context, Entity, SharedString, Window
 use i18n::t;
 use music::{Album, GenreItem, MediaKind, Playlist, SavedArtist, Track};
 use router::{Destination, navigate};
-use state::{Addition, Detail, History, Library, Origin, Playback, Shelf, Sonora};
+use state::{Addition, Detail, History, Library, Mix, Origin, Playback, Shelf, Sonora};
 use ui::{Menu, MenuItem, MenuSearch, Pin, PinKind, Scrollbar, SubmenuState};
 
 use crate::shared::confirm::Confirm;
@@ -402,7 +402,8 @@ impl ItemMenu {
                         .icon("icons/shuffle.svg")
                         .on_click(move |_, _, cx| {
                             let playback = Sonora::global(cx).playback.clone();
-                            playback.update(cx, |playback, cx| playback.play_mix(&track, cx));
+                            let mix = Mix::around(&track);
+                            playback.update(cx, |playback, cx| playback.play_mix(&mix, cx));
                         }),
                 )
             }

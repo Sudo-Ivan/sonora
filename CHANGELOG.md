@@ -7,6 +7,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Mixes now gather related artists, the way Spotify's daily mixes do: the shelf's artists
+  cluster by the releases, tags and credits they share, and rank by favorites and recent
+  plays. Each mix also reaches beyond its own artists for tracks by the ones closest to
+  them, and weighs what was played lately against what was never heard.
+- The forever queue walks the library by taste and artist affinity out from the current
+  track instead of picking unheard tracks at random.
+
 ## [0.42.7] - 2026-10-03
 
 ### Changed

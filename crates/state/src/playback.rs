@@ -89,8 +89,8 @@ use crate::queue::Queue;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AppSettings, Io, Network, Outcome, Session, SessionEvent, Shelf, Sonora, Target, Toasts, join,
-    mix,
+    AppSettings, Io, Mix, Network, Outcome, Session, SessionEvent, Shelf, Sonora, Target, Toasts,
+    join, mix,
 };
 
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
@@ -754,10 +754,12 @@ impl Playback {
         }));
     }
 
-    /// Plays `seed` now and lines up the library's closest tracks behind it, scored locally
-    /// rather than fetched from a station. The seed's shelf is the pool; when it is empty the
-    /// other shelf's tracks stand in. What the queue already holds never comes back.
-    pub fn play_mix(&mut self, seed: &Track, cx: &mut Context<Self>) {
+    /// Plays the mix's seed now and lines up the library's closest tracks behind it, scored
+    /// locally against the mix's artists rather than fetched from a station. The seed's
+    /// shelf is the pool; when it is empty the other shelf's tracks stand in. What the
+    /// queue already holds never comes back.
+    pub fn play_mix(&mut self, mix: &Mix, cx: &mut Context<Self>) {
+        let seed = &mix.seed;
         let Some(id) = seed.id.clone() else {
             return self.failed(format!("{} has no track id", seed.name), cx);
         };
@@ -765,13 +767,10 @@ impl Playback {
             return self.failed(format!("{} is not available to stream", seed.name), cx);
         }
 
-        let Some(library) = cx
-            .try_global::<Sonora>()
-            .map(|sonora| sonora.library.clone())
-        else {
+        let Some(sonora) = cx.try_global::<Sonora>() else {
             return;
         };
-        let library = library.read(cx);
+        let library = sonora.library.read(cx);
         let first = Shelf::of(&id);
         let other = match first {
             Shelf::Streaming => Shelf::Local,
@@ -784,6 +783,11 @@ impl Playback {
             return;
         };
         let pool = library.state(shelf).tracks();
+        let favorites: HashSet<String> = library
+            .favorite_tracks(shelf)
+            .iter()
+            .filter_map(|track| track.id.clone())
+            .collect();
         let years: HashMap<&str, i32> = library
             .state(shelf)
             .albums()
@@ -791,13 +795,14 @@ impl Playback {
             .filter(|album| album.year > 0)
             .map(|album| (album.id.as_str(), album.year))
             .collect();
-        let year = seed
-            .album_id
-            .as_deref()
-            .and_then(|album| years.get(album))
-            .copied();
+        let index = mix::Index::new(
+            pool.iter(),
+            &favorites,
+            &years,
+            sonora.history.read(cx).tracks().iter(),
+        );
         let heard = self.queue.read(cx).ids();
-        let tracks = mix::score(seed, pool, &heard, year, &years);
+        let tracks = mix::score(&index, mix, &heard);
         if tracks.is_empty() {
             return;
         }
@@ -1506,9 +1511,10 @@ impl Playback {
     /// runs after the provider's own answers: a station stretch or a similar-tracks batch
     /// that lands usually leaves nothing to fill, and a provider batch spawned while the run
     /// was empty replaces whatever this filled, so radio stays first where it answers. What
-    /// the queue holds and what the last stretch of history played never come back. A fill
-    /// that lands while nothing is playing at all moves the queue on, the way a station
-    /// stretch does.
+    /// the queue holds and what the last stretch of history played never come back, and the
+    /// fill follows the shelf's own taste and artist affinities out from the current track.
+    /// A fill that lands while nothing is playing at all moves the queue on, the way a
+    /// station stretch does.
     fn forever_fill(&mut self, cx: &mut Context<Self>) {
         if !self.forever || self.topping.is_some() {
             return;
@@ -1530,21 +1536,40 @@ impl Playback {
                 return;
             };
             let library = sonora.library.read(cx);
-            let pool: Vec<&Track> = [Shelf::Streaming, Shelf::Local]
+            let shelves = [Shelf::Streaming, Shelf::Local];
+            let pool: Vec<&Track> = shelves
                 .into_iter()
                 .flat_map(|shelf| library.state(shelf).tracks().iter())
                 .collect();
+            let mut favorites = HashSet::new();
+            let mut years = HashMap::new();
+            for shelf in shelves {
+                favorites.extend(
+                    library
+                        .favorite_tracks(shelf)
+                        .iter()
+                        .filter_map(|track| track.id.clone()),
+                );
+                years.extend(
+                    library
+                        .state(shelf)
+                        .albums()
+                        .iter()
+                        .filter(|album| album.year > 0)
+                        .map(|album| (album.id.as_str(), album.year)),
+                );
+            }
+            let history = sonora.history.read(cx);
             let mut heard = self.queue.read(cx).ids();
             heard.extend(
-                sonora
-                    .history
-                    .read(cx)
+                history
                     .tracks()
                     .iter()
                     .take(mix::FOREVER_HISTORY)
                     .filter_map(|track| track.id.clone()),
             );
-            mix::batch(&pool, &heard, mix::FOREVER_BATCH)
+            let index = mix::Index::new(pool, &favorites, &years, history.tracks().iter());
+            mix::batch(&index, &heard, self.track.as_ref(), mix::FOREVER_BATCH)
         };
         if tracks.is_empty() {
             return;

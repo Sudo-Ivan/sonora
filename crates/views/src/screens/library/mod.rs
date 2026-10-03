@@ -57,7 +57,8 @@ impl From<LibraryTab> for Section {
 /// One page of a shelf. Songs lists the favorites on a `Shape::Saved` shelf and every song on a
 /// `Shape::Catalog` one, and Favorites always lists the shelf's starred songs; the other
 /// sections follow the same rule for their kind, or are made from the shelf itself: Mixes are
-/// artist mixes scored off its tracks, and Genres are its tags or its provider's categories.
+/// clusters of its artists scored off its tracks, and Genres are its tags or its provider's
+/// categories.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Songs,
@@ -497,7 +498,7 @@ impl LibraryView {
         let toolbar = Toolbar::searchable(&me, cx);
 
         let card_scrollbar = cx.new(|_| Scrollbar::new(ScrollHandle::new()).watching(id));
-        let mixes: Rc<Vec<Mix>> = library.read(cx).mixes(shelf).into();
+        let mixes: Rc<Vec<Mix>> = library.read(cx).mixes(shelf, cx).into();
 
         let mut view = Self {
             shelf,
@@ -1083,7 +1084,7 @@ impl LibraryView {
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         self.cards_dirty = true;
-        self.mixes = self.library.read(cx).mixes(self.shelf).into();
+        self.mixes = self.library.read(cx).mixes(self.shelf, cx).into();
         for table in self.tables() {
             table.rebuild(cx);
         }
@@ -1292,8 +1293,8 @@ impl LibraryView {
         )
     }
 
-    /// The Mixes page: a card per artist mix the shelf's tracks make. There is no page behind
-    /// a mix, so the card's press and its play control do the same thing.
+    /// The Mixes page: a card per artist cluster the shelf's tracks make. There is no page
+    /// behind a mix, so the card's press and its play control do the same thing.
     fn mix_grid(&self, note: Option<Vacancy>, window: &Window, cx: &App) -> AnyElement {
         let theme = *cx.theme();
         let inset = theme.metrics.inset;
@@ -1343,8 +1344,8 @@ impl LibraryView {
             .into_any_element()
     }
 
-    /// One artist mix: its play control toggles the running mix in place, and pressing the
-    /// card does the same since there is no page behind it.
+    /// One mix: its play control toggles the running mix in place, and pressing the card
+    /// does the same since there is no page behind it.
     fn mix_card(&self, index: usize, mix: &Mix, card: Pixels, cx: &App) -> AnyElement {
         let theme = *cx.theme();
         let seed = mix.seed.clone();
@@ -1370,7 +1371,8 @@ impl LibraryView {
 
         let playback = self.playback.clone();
         let toggled = self.playback.clone();
-        let press_seed = seed.clone();
+        let play_mix = mix.clone();
+        let press_mix = mix.clone();
         let press_state = state.clone();
 
         Card::new(
@@ -1395,7 +1397,7 @@ impl LibraryView {
                 Some(PlaybackState::Paused) => {
                     playback.update(cx, |playback, cx| playback.resume(cx))
                 }
-                _ => playback.update(cx, |playback, cx| playback.play_mix(&seed, cx)),
+                _ => playback.update(cx, |playback, cx| playback.play_mix(&play_mix, cx)),
             })
             .press(move |_, _, cx| match press_state {
                 Some(PlaybackState::Playing) => {
@@ -1404,7 +1406,7 @@ impl LibraryView {
                 Some(PlaybackState::Paused) => {
                     toggled.update(cx, |playback, cx| playback.resume(cx))
                 }
-                _ => toggled.update(cx, |playback, cx| playback.play_mix(&press_seed, cx)),
+                _ => toggled.update(cx, |playback, cx| playback.play_mix(&press_mix, cx)),
             })
         })
         .into_any_element()

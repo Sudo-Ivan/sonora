@@ -8,7 +8,9 @@ use gpui::{App, Context, Entity, SharedString, Task};
 use music::{Album, MediaKind, MusicApi, Page, Pages, Playlist, SavedArtist, Shape, Track};
 
 use crate::snapshot::{Kind, Remembered, Snapshots};
-use crate::{Io, Mix, Network, Outcome, Session, SessionEvent, Target, Toasts, join, mix, mosaic};
+use crate::{
+    Io, Mix, Network, Outcome, Session, SessionEvent, Sonora, Target, Toasts, join, mix, mosaic,
+};
 
 const FATAL: [LibraryPart; 3] = [
     LibraryPart::Tracks,
@@ -1200,21 +1202,34 @@ impl Library {
         self.loading(shelf, LibraryPart::Tracks) || self.held(shelf).starred_pending
     }
 
-    /// The artist mixes the shelf's tracks make, favorites first, for the cards of the Mixes
-    /// page. Each one's seed is what `Playback::play_mix` scores the shelf against.
-    pub fn mixes(&self, shelf: Shelf) -> Vec<Mix> {
+    /// The mixes the shelf's tracks make, best first, for the cards of the Mixes page.
+    /// Artists cluster by the releases, tags and credits they share and rank by the
+    /// listener's taste; each mix's seed is what `Playback::play_mix` opens with.
+    pub fn mixes(&self, shelf: Shelf, cx: &App) -> Vec<Mix> {
         let held = self.held(shelf);
-        let favorites: HashSet<String> = held
-            .favorites()
-            .map(|favorites| {
-                favorites
-                    .tracks
-                    .iter()
-                    .filter_map(|track| track.id.clone())
-                    .collect()
-            })
-            .unwrap_or_default();
-        mix::seeds(held.state.tracks(), &favorites, mix::MIXES)
+        let favorites: HashSet<String> = self
+            .favorite_tracks(shelf)
+            .iter()
+            .filter_map(|track| track.id.clone())
+            .collect();
+        let years: HashMap<&str, i32> = held
+            .state
+            .albums()
+            .iter()
+            .filter(|album| album.year > 0)
+            .map(|album| (album.id.as_str(), album.year))
+            .collect();
+        let recent: &[Track] = cx
+            .try_global::<Sonora>()
+            .map(|sonora| sonora.history.read(cx).tracks())
+            .unwrap_or(&[]);
+        let index = mix::Index::new(
+            held.state.tracks().iter(),
+            &favorites,
+            &years,
+            recent.iter(),
+        );
+        mix::seeds(&index, mix::MIXES)
     }
 
     fn favorites(&self, id: &str) -> Option<Favorites<'_>> {
