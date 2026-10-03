@@ -18,6 +18,22 @@ pub fn cap_arenas() {
 #[cfg(not(all(target_os = "linux", target_env = "gnu")))]
 pub fn cap_arenas() {}
 
+/// Defaults for the pools that size themselves from the environment, set before any of them
+/// start. `blocking` carries the dbus and portal work on up to 500 threads by default, and
+/// rayon's pool is one per core; neither asks that much of a music app. A value the user
+/// already set always wins, the way `GPUI_WORKER_THREADS` overrides the dispatcher's own.
+pub fn cap_pools() {
+    // Safe: this runs before any thread exists to read the variables concurrently.
+    unsafe {
+        if std::env::var_os("BLOCKING_MAX_THREADS").is_none() {
+            std::env::set_var("BLOCKING_MAX_THREADS", "8");
+        }
+        if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+            std::env::set_var("RAYON_NUM_THREADS", "8");
+        }
+    }
+}
+
 /// Resident bytes above which a tick acts rather than trims: the artwork cache is squeezed
 /// to its small resident set and the heap handed back to the allocator. Well past a healthy
 /// session's working set, so the flush only runs when something is genuinely bloated.

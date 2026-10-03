@@ -39,6 +39,7 @@ const OPEN_COALESCE: Duration = Duration::from_millis(250);
 
 fn main() {
     memory::cap_arenas();
+    memory::cap_pools();
     logging::init();
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
