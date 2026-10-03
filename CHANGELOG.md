@@ -7,10 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.9] - 2026-10-03
+
 ### Changed
 
 - The spectrum analyzer no longer works a sample at a time on either end, which drops its
   cost during playback to nearly nothing while the visualizer is out of sight.
+
+### Fixed
+
+- Provider requests and cover art verify TLS inside Flatpak and other sandboxes again: the
+  verifier now carries the bundled Mozilla roots under the platform's own.
 
 ## [0.42.8] - 2026-10-03
 
