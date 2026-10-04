@@ -995,7 +995,7 @@ impl FullscreenView {
                     .ghost()
                     .when(frosted, Button::frosted)
                     .small()
-                    .icon("icons/chevron-down.svg")
+                    .icon("icons/minimize.svg")
                     .tooltip_above("player-fullscreen-leave")
                     .on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(ToggleFullscreen), cx)

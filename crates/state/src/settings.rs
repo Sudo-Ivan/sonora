@@ -296,6 +296,7 @@ struct Appearance {
     battery_saver: String,
     theme_overrides: ThemeOverrides,
     fullscreen_controls_autohide: String,
+    os_fullscreen: bool,
 }
 
 /// A valid custom theme, identified by its filename stem.
@@ -534,6 +535,7 @@ impl Default for Appearance {
             battery_saver: Saver::default().id().to_owned(),
             theme_overrides: ThemeOverrides::default(),
             fullscreen_controls_autohide: FullscreenControlsAutohide::Automatic.id().to_owned(),
+            os_fullscreen: false,
         }
     }
 }
@@ -871,6 +873,11 @@ impl AppSettings {
 
     pub fn blur_window(&self) -> bool {
         self.values.appearance.blur_window
+    }
+
+    /// Whether opening the fullscreen view also puts the window into OS fullscreen.
+    pub fn os_fullscreen(&self) -> bool {
+        self.values.appearance.os_fullscreen
     }
 
     pub fn stillness(&self) -> Stillness {
@@ -1476,6 +1483,11 @@ impl AppSettings {
 
     pub fn set_blur_window(&mut self, blur: bool, cx: &mut Context<Self>) {
         self.values.appearance.blur_window = blur;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_os_fullscreen(&mut self, value: bool, cx: &mut Context<Self>) {
+        self.values.appearance.os_fullscreen = value;
         self.schedule_save(cx);
     }
 
