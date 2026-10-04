@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.11] - 2026-10-04
+
 ### Removed
 
 - YouTube Music support is gone: the provider, its guest mode, the browser sign-in and the
