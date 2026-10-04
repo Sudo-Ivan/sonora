@@ -1352,7 +1352,7 @@ impl LibraryView {
             .map(|origin| origin.named(seed.name.clone()));
         let state = origin
             .as_ref()
-            .and_then(|origin| self.playback.read(cx).playing_from(origin));
+            .and_then(|origin| self.playback.read(cx).playing_from(origin, cx));
         let playing = state == Some(true);
 
         let artists = cells::artist_links(
