@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.10] - 2026-10-04
+
 ### Fixed
 
 - The system media widget now shows the cover art for servers whose certificate had to be
