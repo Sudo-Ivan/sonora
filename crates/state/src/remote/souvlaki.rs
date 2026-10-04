@@ -91,9 +91,9 @@ fn command(event: MediaControlEvent) -> Option<Command> {
         MediaControlEvent::Seek(direction) => step(direction, SEEK_STEP),
         MediaControlEvent::SeekBy(direction, by) => step(direction, by),
         MediaControlEvent::SetVolume(level) => Command::Volume(level),
-        MediaControlEvent::OpenUri(_) | MediaControlEvent::Raise | MediaControlEvent::Quit => {
-            return None;
-        }
+        MediaControlEvent::Raise => Command::Raise,
+        MediaControlEvent::Quit => Command::Quit,
+        MediaControlEvent::OpenUri(_) => return None,
     })
 }
 

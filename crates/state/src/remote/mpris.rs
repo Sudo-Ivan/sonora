@@ -6,7 +6,7 @@ use anyhow::Result;
 use futures::future;
 use gpui::{App, Task};
 use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Player, Time, TrackId};
-use music::Track;
+use music::{LOCAL_TRACK_PREFIX, Track};
 use tokio::sync::mpsc;
 
 use super::{BUS_NAME, Command, DISPLAY_NAME};
@@ -116,6 +116,8 @@ async fn build(commands: mpsc::UnboundedSender<Command>) -> mpris_server::zbus::
         .can_go_previous(true)
         .can_seek(true)
         .can_control(true)
+        .can_quit(true)
+        .can_raise(true)
         .build()
         .await?;
 
@@ -176,13 +178,21 @@ async fn build(commands: mpsc::UnboundedSender<Command>) -> mpris_server::zbus::
         let send = send.clone();
         move |_, on| send(Command::Shuffle(on))
     });
-    player.connect_set_loop_status(move |_, status| {
-        send(Command::Repeat(match status {
-            LoopStatus::None => Repeat::Off,
-            LoopStatus::Playlist => Repeat::All,
-            LoopStatus::Track => Repeat::One,
-        }))
+    player.connect_set_loop_status({
+        let send = send.clone();
+        move |_, status| {
+            send(Command::Repeat(match status {
+                LoopStatus::None => Repeat::Off,
+                LoopStatus::Playlist => Repeat::All,
+                LoopStatus::Track => Repeat::One,
+            }))
+        }
     });
+    player.connect_raise({
+        let send = send.clone();
+        move |_| send(Command::Raise)
+    });
+    player.connect_quit(move |_| send(Command::Quit));
     Ok(player)
 }
 
@@ -217,7 +227,27 @@ fn metadata(track: &Track, cover: Option<&str>) -> Metadata {
         .length(time(track.duration))
         .build();
     metadata.set_art_url(cover);
+    metadata.set_url(location(track));
+    metadata.set_genre((!track.tags.is_empty()).then(|| track.tags.clone()));
+    metadata.set_track_number(
+        (track.track_number > 0).then(|| track.track_number.min(i32::MAX as u32) as i32),
+    );
+    metadata.set_disc_number(
+        (track.disc_number > 0).then(|| track.disc_number.min(i32::MAX as u32) as i32),
+    );
+    metadata.set_use_count(
+        track
+            .playcount
+            .map(|count| i32::try_from(count).unwrap_or(i32::MAX)),
+    );
     metadata
+}
+
+/// The file a widget can open for the track. Only a local file has one; a streamed track
+/// carries no public url, so it is left out rather than publishing a link that 404s.
+fn location(track: &Track) -> Option<String> {
+    let path = track.id.as_deref()?.strip_prefix(LOCAL_TRACK_PREFIX)?;
+    Some(format!("file://{path}"))
 }
 
 /// An object path standing for the track, which MPRIS needs to match a seek to the track it
@@ -231,4 +261,136 @@ fn track_id(track: &Track) -> TrackId {
 
 fn time(at: Duration) -> Time {
     Time::from_micros(at.as_micros().try_into().unwrap_or(i64::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use mpris_server::zbus;
+    use mpris_server::zbus::zvariant::OwnedValue;
+
+    use super::*;
+
+    fn track() -> Track {
+        Track {
+            id: Some("track".to_owned()),
+            name: "track".to_owned(),
+            playable: true,
+            artists: "artist".to_owned(),
+            artist_refs: Vec::new(),
+            album: "album".to_owned(),
+            album_id: None,
+            cover: None,
+            duration: Duration::from_secs(180),
+            added_at: None,
+            added_by: None,
+            playcount: None,
+            popularity: 0,
+            explicit: false,
+            track_number: 0,
+            disc_number: 0,
+            tags: Vec::new(),
+            languages: Vec::new(),
+            credits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn metadata_carries_the_cover() {
+        let published = metadata(&track(), Some("file:///tmp/cover.jpg"));
+        assert_eq!(
+            published.art_url().as_deref(),
+            Some("file:///tmp/cover.jpg")
+        );
+        let bare = metadata(&track(), None);
+        assert_eq!(bare.art_url(), None);
+    }
+
+    #[test]
+    fn metadata_carries_the_track_details() {
+        let mut detailed = track();
+        detailed.tags = vec!["shoegaze".to_owned(), "dream pop".to_owned()];
+        detailed.track_number = 4;
+        detailed.disc_number = 2;
+        detailed.playcount = Some(37);
+        let published = metadata(&detailed, None);
+        assert_eq!(
+            published.genre(),
+            Some(vec!["shoegaze".to_owned(), "dream pop".to_owned()])
+        );
+        assert_eq!(published.track_number(), Some(4));
+        assert_eq!(published.disc_number(), Some(2));
+        assert_eq!(published.use_count(), Some(37));
+
+        // an unset number or count publishes nothing rather than a zero a widget would show
+        let bare = metadata(&track(), None);
+        assert_eq!(bare.genre(), None);
+        assert_eq!(bare.track_number(), None);
+        assert_eq!(bare.disc_number(), None);
+        assert_eq!(bare.use_count(), None);
+    }
+
+    #[test]
+    fn metadata_links_a_local_track_to_its_file() {
+        let mut local = track();
+        local.id = Some(format!("{LOCAL_TRACK_PREFIX}/music/a.flac"));
+        assert_eq!(
+            metadata(&local, None).url().as_deref(),
+            Some("file:///music/a.flac")
+        );
+        // a streamed track has no file a widget could open
+        assert_eq!(metadata(&track(), None).url(), None);
+    }
+
+    /// Builds the real player on the session bus, publishes a track with a cover and reads the
+    /// Metadata property back over D-Bus. Skipped where no session bus answers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn publishes_the_cover_over_dbus() {
+        let Ok(connection) = zbus::Connection::session().await else {
+            return;
+        };
+        let (commands, _inbox) = mpsc::unbounded_channel();
+        let player = build(commands).await.expect("cannot build the player");
+        let check = async {
+            apply(
+                &player,
+                Update::Metadata(metadata(&track(), Some("file:///tmp/cover.jpg"))),
+            )
+            .await
+            .expect("cannot publish the metadata");
+            let properties = zbus::fdo::PropertiesProxy::builder(&connection)
+                .destination("org.mpris.MediaPlayer2.sonora")
+                .expect("bad destination")
+                .path("/org/mpris/MediaPlayer2")
+                .expect("bad path")
+                .build()
+                .await
+                .expect("cannot reach the player");
+            let value = properties
+                .get(
+                    "org.mpris.MediaPlayer2.Player"
+                        .try_into()
+                        .expect("bad interface"),
+                    "Metadata",
+                )
+                .await
+                .expect("cannot read the metadata");
+            let fields: HashMap<String, OwnedValue> =
+                value.try_into().expect("metadata is not a dictionary");
+            assert_eq!(
+                fields["mpris:artUrl"]
+                    .downcast_ref::<zbus::zvariant::Str>()
+                    .map(|url| url.to_string()),
+                Ok("file:///tmp/cover.jpg".to_owned())
+            );
+            assert_eq!(
+                fields["xesam:title"]
+                    .downcast_ref::<zbus::zvariant::Str>()
+                    .map(|title| title.to_string()),
+                Ok("track".to_owned())
+            );
+        };
+        future::select(std::pin::pin!(player.run()), std::pin::pin!(check)).await;
+    }
 }

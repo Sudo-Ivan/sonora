@@ -7,6 +7,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The system media widget now shows the cover art for servers whose certificate had to be
+  accepted by hand: the artwork download honours the same trust registry as every other
+  request.
+
+### Added
+
+- The desktop's media widget can now raise the window or quit the app, and the metadata it
+  shows carries genre, track and disc numbers, play count, and the file a local track
+  points at.
+
 ## [0.42.9] - 2026-10-03
 
 ### Changed

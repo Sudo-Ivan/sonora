@@ -360,7 +360,7 @@ fn open_window(cx: &mut App) {
                 Sonora::global(cx).settings.read(cx).window_rounding(),
             );
             let handle = platform_handle(window);
-            state::attach_remote(handle, cx);
+            state::attach_remote(handle, show_window, cx);
             #[cfg(windows)]
             if let Some(handle) = handle {
                 thumbbar::install(window.window_handle().window_id(), handle, cx);

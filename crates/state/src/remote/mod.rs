@@ -50,11 +50,21 @@ enum Command {
     Shuffle(bool),
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     Repeat(Repeat),
+    Raise,
+    Quit,
 }
+
+/// What a widget's Raise does, opening the window first when the tray is keeping the app
+/// alive without one.
+type Raise = fn(&mut App);
+
+/// The entities the remote watches and drives: what plays, what is queued and which cover is
+/// resolved for the track.
+type Followed = (Entity<Playback>, Entity<Queue>, Entity<Cover>);
 
 /// Publishes what plays to the system media controls and carries their requests back. The
 /// window handle is only read on Windows, where the controls hang off the window.
-pub fn attach(hwnd: Option<*mut c_void>, cx: &mut App) {
+pub fn attach(hwnd: Option<*mut c_void>, raise: Raise, cx: &mut App) {
     if cx.has_global::<Attached>() {
         return;
     }
@@ -67,11 +77,13 @@ pub fn attach(hwnd: Option<*mut c_void>, cx: &mut App) {
     };
 
     let sonora = Sonora::global(cx);
-    let playback = sonora.playback.clone();
-    let queue = sonora.queue.clone();
-    let cover = sonora.cover.clone();
+    let entities: Followed = (
+        sonora.playback.clone(),
+        sonora.queue.clone(),
+        sonora.cover.clone(),
+    );
     let io = Io::global(cx);
-    let remote = cx.new(|cx| Remote::new(controls, receiver, playback, queue, cover, io, cx));
+    let remote = cx.new(|cx| Remote::new(controls, receiver, entities, io, raise, cx));
     remote.update(cx, |remote, cx| remote.publish(cx));
     cx.set_global(Attached { _remote: remote });
 }
@@ -82,6 +94,7 @@ pub struct Remote {
     queue: Entity<Queue>,
     cover: Entity<Cover>,
     io: Io,
+    raise: Raise,
     shown: Option<String>,
     source: Option<String>,
     reported: Option<PlaybackState>,
@@ -99,12 +112,12 @@ impl Remote {
     fn new(
         controls: Controls,
         mut receiver: mpsc::UnboundedReceiver<Command>,
-        playback: Entity<Playback>,
-        queue: Entity<Queue>,
-        cover: Entity<Cover>,
+        entities: Followed,
         io: Io,
+        raise: Raise,
         cx: &mut Context<Self>,
     ) -> Self {
+        let (playback, queue, cover) = entities;
         let _events = cx.spawn(async move |this, cx| {
             while let Some(command) = receiver.recv().await {
                 if this.update(cx, |this, cx| this.act(command, cx)).is_err() {
@@ -125,6 +138,7 @@ impl Remote {
             queue,
             cover,
             io,
+            raise,
             shown: None,
             source: None,
             reported: None,
@@ -139,6 +153,17 @@ impl Remote {
     }
 
     fn act(&mut self, command: Command, cx: &mut Context<Self>) {
+        match command {
+            Command::Raise => {
+                (self.raise)(cx);
+                return;
+            }
+            Command::Quit => {
+                cx.quit();
+                return;
+            }
+            _ => {}
+        }
         self.playback
             .clone()
             .update(cx, |playback, cx| match command {
@@ -160,6 +185,9 @@ impl Remote {
                 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
                 Command::Shuffle(on) => {
                     self.queue.update(cx, |queue, cx| queue.set_shuffle(on, cx))
+                }
+                Command::Raise | Command::Quit => {
+                    unreachable!("raise and quit are answered before playback")
                 }
             });
     }
