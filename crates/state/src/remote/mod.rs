@@ -287,7 +287,9 @@ async fn artwork(url: &str) -> Result<PathBuf> {
         }
     }
 
-    let bytes = reqwest::get(url)
+    let bytes = music::tls::client()
+        .get(url)
+        .send()
         .await
         .context("cannot request the cover")?
         .error_for_status()
