@@ -75,10 +75,11 @@ fn main() {
         single::Instance::Running => return,
         single::Instance::Failed => exit(1),
     }
-    // Two rustls backends are compiled in: ytmusic still asks for ring, while reqwest 0.13
-    // and opensubsonic ask for aws-lc-rs. rustls refuses to guess between them, so one is
-    // picked here. A second install only means another crate got there first.
-    rustls::crypto::ring::default_provider()
+    // Two rustls backends are compiled in: tls asks for ring, while reqwest 0.13 and
+    // opensubsonic ask for aws-lc-rs. rustls refuses to guess between them, so one is picked
+    // here for the call sites that name no provider. A second install only means another
+    // crate got there first.
+    rustls::crypto::aws_lc_rs::default_provider()
         .install_default()
         .ok();
 
@@ -106,7 +107,6 @@ fn main() {
 
         let database = storage::Database::standard();
         let providers: Vec<Arc<dyn music::MusicProvider>> = vec![
-            Arc::new(music::youtube::YouTubeProvider::new()),
             Arc::new(music::subsonic::SubsonicProvider::new()),
             Arc::new(music::deezer::DeezerProvider::new()),
         ];
@@ -120,7 +120,6 @@ fn main() {
             ));
         let lyrics: Vec<Arc<dyn LyricsProvider>> = vec![
             Arc::new(music::local::LocalLyrics),
-            Arc::new(music::youtube::YouTubeLyrics::new()),
             Arc::new(music::musixmatch::Musixmatch::new()),
             Arc::new(music::lrclib::LrcLib::new()),
             Arc::new(music::kugou::Kugou::new()),
@@ -300,7 +299,6 @@ fn open_window(cx: &mut App) {
         network: _,
         pins: _,
         playback,
-        potoken: _,
         queue,
         scan: _,
         scrobbling: _,

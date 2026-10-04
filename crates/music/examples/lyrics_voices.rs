@@ -31,10 +31,7 @@ async fn main() {
         ("Clair de Lune", "Claude Debussy", "", 300),
         ("Zxqvortle Plimbath", "Nobody Realish", "", 123),
     ];
-    let providers: Vec<Arc<dyn LyricsProvider>> = vec![
-        Arc::new(music::youtube::YouTubeLyrics::new()),
-        Arc::new(musixmatch::Musixmatch::new()),
-    ];
+    let providers: Vec<Arc<dyn LyricsProvider>> = vec![Arc::new(musixmatch::Musixmatch::new())];
 
     for (title, artist, album, seconds) in wanted {
         let query = LyricsQuery {

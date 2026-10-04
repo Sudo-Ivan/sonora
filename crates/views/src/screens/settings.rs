@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use crate::shared::effects;
 use crate::shared::local;
-use crate::shared::popups::{AccountPicker, CookiePrompt, SearchPopup, matches_query};
+use crate::shared::popups::{CookiePrompt, SearchPopup, matches_query};
 use crate::shared::text;
 use crate::shared::veil::{Edge, veil};
 use gpui::{
@@ -17,7 +17,7 @@ use gpui::{ScrollHandle, prelude::*, svg};
 use i18n::{Language, t};
 use music::equalizer::{self, Preset};
 use music::scrobble::{Link, Secret};
-use music::{AccountChoice, SignIn, SignInPrompt, WritingSystem};
+use music::{SignIn, SignInPrompt, WritingSystem};
 use router::{Destination, NavEntry, Screen, SettingsTab, navigate};
 use state::{
     AppSettings, Failure, FullscreenControlsAutohide, Io, Playback, SYSTEM_FONT, Scan,
@@ -193,9 +193,6 @@ struct Field {
     masked: bool,
 }
 
-/// What the guest card answers to, where a provider card answers to its slug.
-const GUEST: &str = "guest";
-
 /// What a whole account card does when it is clicked.
 type Press = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -210,22 +207,12 @@ struct Account {
     error: Option<Failure>,
 }
 
-/// The guest entry the accounts block draws under the providers. It is a card of the app's
-/// own, not a provider: it stands for the anonymous session `slug` offers, so signing out of
-/// it signs that provider out.
-#[derive(Clone, Copy)]
-struct Guest {
-    slug: &'static str,
-    stored: bool,
-    active: bool,
-}
-
-/// Which sign-in methods a provider card lists. Anonymous never appears there, because guest
-/// mode has a card of its own, and a stored account is asked for nothing.
+/// Which sign-in methods a provider card lists. A stored account is asked for nothing, and a
+/// folder pick is the local provider's own dialog rather than a method on the card.
 fn offered(method: &SignIn, stored: bool) -> bool {
     match method {
         SignIn::Default | SignIn::Secret | SignIn::Credentials { .. } => !stored,
-        SignIn::Anonymous | SignIn::Path(_) => false,
+        SignIn::Path(_) => false,
     }
 }
 
@@ -275,7 +262,7 @@ pub struct SettingsView {
     /// Whether the credentials dialog's certificate opt-out is on.
     insecure_tls: bool,
     secret: Entity<Input>,
-    manual_secret: Option<(&'static str, &'static str)>,
+    manual_secret: Option<&'static str>,
     scrobbling: Entity<Scrobbling>,
     scrobble_first: Entity<Input>,
     scrobble_second: Entity<Input>,
@@ -294,9 +281,9 @@ pub struct SettingsView {
     /// sign-in it started is over, so the veil never blinks away between it and the prompt
     /// that follows.
     sign_in_running: bool,
-    /// The card the user just switched to, by slug or `guest`. Its radio fills while the
-    /// session tears the old provider down and brings the new one up, which reports nothing
-    /// active in between.
+    /// The card the user just switched to, by slug. Its radio fills while the session tears
+    /// the old provider down and brings the new one up, which reports nothing active in
+    /// between.
     chosen: Option<&'static str>,
     languages: SearchPopup,
     typefaces: SearchPopup,
@@ -376,7 +363,7 @@ impl SettingsView {
             password: cx.new(|cx| Input::new("login-password-hint", cx).masked()),
             credentials_for: None,
             insecure_tls: false,
-            secret: cx.new(|cx| Input::new("login-cookie-hint", cx)),
+            secret: cx.new(|cx| Input::new("login-cookie-named-hint", cx)),
             manual_secret: None,
             sign_in_for: None,
             focus,
@@ -784,9 +771,6 @@ impl SettingsView {
         let mut total = SECTION_GAP + head + SECTION_GAP;
         for account in self.providers(cx) {
             total += SECTION_GAP + card_height(theme, account.error.is_some());
-        }
-        if self.guest(cx).is_some() {
-            total += SECTION_GAP + card_height(theme, false);
         }
         total + ACCOUNTS_SLACK
     }
@@ -2472,7 +2456,6 @@ impl SettingsView {
         let settings = self.settings.read(cx);
         let providers = [
             (music::lyrics::LOCAL, "settings-lyrics-provider-local"),
-            ("YouTube Music", "settings-lyrics-provider-youtube"),
             ("Musixmatch", "settings-lyrics-provider-musixmatch"),
             ("LrcLib", "settings-lyrics-provider-lrclib"),
             ("Kugou", "settings-lyrics-provider-kugou"),
@@ -3050,11 +3033,7 @@ impl SettingsView {
     fn providers(&self, cx: &App) -> Vec<Account> {
         let session = self.session.read(cx);
         let signed_out = matches!(session.state(), SessionState::SignedOut);
-        let guest = !session.authenticated();
-        let waiting = match session.state() {
-            SessionState::Authorizing(prompt) => !matches!(prompt, Some(SignInPrompt::Accounts(_))),
-            _ => false,
-        };
+        let waiting = matches!(session.state(), SessionState::Authorizing(_));
         let loading = session.is_pending();
         let chosen = self.chosen.filter(|_| loading);
         session
@@ -3064,13 +3043,13 @@ impl SettingsView {
                 name: info.name,
                 options: info.options,
                 web_sign_in: info.web_sign_in,
-                stored: info.stored && !info.guest,
+                stored: info.stored,
                 // a session on its way up reports no account yet, so while it loads the card
                 // it belongs to keeps the radio rather than leaving the list blank
                 active: match chosen {
                     Some(picked) => picked == info.slug,
-                    None if loading => info.active && !info.guest,
-                    None => info.active && !signed_out && !guest,
+                    None if loading => info.active,
+                    None => info.active && !signed_out,
                 },
                 cancel: waiting && info.pending,
                 error: info.error,
@@ -3078,41 +3057,13 @@ impl SettingsView {
             .collect()
     }
 
-    /// The guest card, when a provider offers an anonymous session at all. A guest run leaves
-    /// that provider's own card connected to nothing, so only this card reports it.
-    fn guest(&self, cx: &App) -> Option<Guest> {
-        let session = self.session.read(cx);
-        let signed_out = matches!(session.state(), SessionState::SignedOut);
-        let info = session.providers().find(|info| {
-            info.options
-                .iter()
-                .any(|option| matches!(option, SignIn::Anonymous))
-        })?;
-        let loading = session.is_pending();
-        let active = match self.chosen.filter(|_| loading) {
-            Some(picked) => picked == GUEST,
-            None if loading => info.active && info.guest,
-            None => info.active && !signed_out && !session.authenticated(),
-        };
-        Some(Guest {
-            slug: info.slug,
-            stored: info.guest,
-            active,
-        })
-    }
-
-    /// The words the accounts row answers a search with: every provider name, and the guest
-    /// entry when one is shown.
+    /// The words the accounts row answers a search with.
     fn account_words(&self, cx: &App) -> String {
-        let mut names: Vec<String> = self
-            .providers(cx)
+        self.providers(cx)
             .iter()
             .map(|account| account.name.to_string())
-            .collect();
-        if self.guest(cx).is_some() {
-            names.push(t!("login-guest-title").to_string());
-        }
-        names.join(" ")
+            .collect::<Vec<String>>()
+            .join(" ")
     }
 
     fn accounts_row(&self, cx: &mut Context<Self>) -> Setting {
@@ -3122,9 +3073,6 @@ impl SettingsView {
         let mut cards = Vec::new();
         for account in self.providers(cx) {
             cards.push(self.account_card(account, pending, cx).into_any_element());
-        }
-        if let Some(guest) = self.guest(cx) {
-            cards.push(self.guest_card(guest, pending, cx).into_any_element());
         }
         let title = t!("settings-accounts");
         let detail = t!("settings-accounts-detail");
@@ -3213,45 +3161,6 @@ impl SettingsView {
                 selected: active,
                 trailing: self.trailing(slug, slug, stored, cancel, pending, cx),
                 error,
-                press: press.filter(|_| !pending),
-            },
-            cx,
-        )
-    }
-
-    /// The guest card. Its buttons drive the provider the anonymous session belongs to, so
-    /// they carry ids of their own rather than that provider's, which has a card too.
-    fn guest_card(&self, guest: Guest, pending: bool, cx: &mut Context<Self>) -> impl IntoElement {
-        let Guest {
-            slug,
-            stored,
-            active,
-        } = guest;
-        let status = active.then(|| t!("settings-provider-guest"));
-        let press: Option<Press> = match (stored, active) {
-            (_, true) => None,
-            (true, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
-                this.chosen = Some(GUEST);
-                this.session
-                    .update(cx, |session, cx| session.switch(slug, cx));
-            }))),
-            (false, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
-                this.chosen = Some(GUEST);
-                this.session.update(cx, |session, cx| {
-                    session.sign_in(slug, SignIn::Anonymous, cx)
-                });
-            }))),
-        };
-
-        card(
-            AccountCard {
-                id: SharedString::from("account-guest"),
-                logo: "icons/hat-glasses.svg",
-                name: t!("login-guest-title"),
-                status,
-                selected: active,
-                trailing: self.trailing(GUEST, slug, active, false, pending, cx),
-                error: None,
                 press: press.filter(|_| !pending),
             },
             cx,
@@ -3515,8 +3424,8 @@ impl SettingsView {
     }
 
     fn start_manual(&mut self, slug: &'static str, provider: &'static str, cx: &mut Context<Self>) {
-        self.manual_secret = Some((slug, provider));
-        let hint = CookiePrompt::hint(slug);
+        self.manual_secret = Some(provider);
+        let hint = CookiePrompt::hint();
         self.secret.update(cx, |input, cx| input.set_hint(hint, cx));
         self.session
             .update(cx, |session, cx| session.sign_in_with_cookies(slug, cx));
@@ -3537,13 +3446,8 @@ impl SettingsView {
             .update(cx, |session, cx| session.submit_input(text, cx));
     }
 
-    fn secret_prompt(
-        &self,
-        slug: &'static str,
-        provider: &'static str,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        CookiePrompt::new(slug, provider, self.secret.clone())
+    fn secret_prompt(&self, provider: &'static str, cx: &mut Context<Self>) -> impl IntoElement {
+        CookiePrompt::new(provider, self.secret.clone())
             .on_submit(cx.listener(|this, _, _, cx| this.submit_secret(cx)))
             .on_cancel(cx.listener(|this, _, _, cx| this.abandon(cx)))
     }
@@ -3596,7 +3500,6 @@ impl SettingsView {
                 format!("connect-{slug}"),
                 t!("login-sign-in", provider = provider),
             ),
-            SignIn::Anonymous => (format!("connect-{slug}-guest"), t!("login-guest-use")),
             SignIn::Secret => (
                 format!("connect-{slug}-cookies"),
                 t!("login-sign-in", provider = provider),
@@ -3778,23 +3681,6 @@ impl SettingsView {
             detail,
             element,
         }
-    }
-
-    fn account_modal(
-        &self,
-        accounts: Vec<AccountChoice>,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        AccountPicker::new(accounts)
-            .on_pick(cx.listener(|this, id: &SharedString, _, cx| {
-                let id = id.to_string();
-                this.session
-                    .update(cx, |session, cx| session.submit_input(id, cx));
-            }))
-            .on_cancel(cx.listener(|this, _, _, cx| {
-                this.session
-                    .update(cx, |session, cx| session.cancel_sign_in(cx));
-            }))
     }
 }
 
@@ -4039,12 +3925,6 @@ impl Render for SettingsView {
             self.typefaces.sync(false, None, window, cx);
         }
 
-        let accounts = match self.session.read(cx).state() {
-            SessionState::Authorizing(Some(SignInPrompt::Accounts(accounts))) => {
-                Some(accounts.clone())
-            }
-            _ => None,
-        };
         if self.sign_in_running && !self.session.read(cx).is_pending() {
             self.sign_in_running = false;
             self.sign_in_for = None;
@@ -4058,7 +3938,7 @@ impl Render for SettingsView {
 
         // only one of these is ever up: a prompt the sign-in raised hides the choice behind
         // it, and the choice holds the veil until that prompt arrives
-        let taken = accounts.is_some() || manual_secret.is_some() || self.credentials_for.is_some();
+        let taken = manual_secret.is_some() || self.credentials_for.is_some();
         let sign_in_for = self.sign_in_for.filter(|_| !taken);
 
         // a dialog takes the key focus, since escape only reaches the page from inside it
@@ -4118,11 +3998,8 @@ impl Render for SettingsView {
                             }),
                     ),
             )
-            .when_some(accounts, |this, accounts| {
-                this.child(self.account_modal(accounts, cx).into_any_element())
-            })
-            .when_some(manual_secret, |this, (slug, provider)| {
-                this.child(self.secret_prompt(slug, provider, cx).into_any_element())
+            .when_some(manual_secret, |this, provider| {
+                this.child(self.secret_prompt(provider, cx).into_any_element())
             })
             .when(self.credentials_for.is_some(), |this| {
                 this.child(self.credentials_prompt(cx).into_any_element())

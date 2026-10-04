@@ -2,14 +2,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use music::youtube::YouTubeClient;
 use music::{
-    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, MusicApi, Track, TrackKey, kugou, lrclib,
-    musixmatch, netease,
+    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, Track, kugou, lrclib, musixmatch, netease,
 };
-use ytmusic::YtMusic;
 
-const SOURCES: [&str; 5] = ["YouTube Music", "Musixmatch", "LrcLib", "Kugou", "NetEase"];
+const SOURCES: [&str; 4] = ["Musixmatch", "LrcLib", "Kugou", "NetEase"];
 
 struct Measured {
     source: &'static str,
@@ -32,7 +29,6 @@ struct Row {
 
 fn providers() -> Vec<Arc<dyn LyricsProvider>> {
     vec![
-        Arc::new(music::youtube::YouTubeLyrics::new()),
         Arc::new(musixmatch::Musixmatch::new()),
         Arc::new(lrclib::LrcLib::new()),
         Arc::new(kugou::Kugou::new()),
@@ -51,12 +47,11 @@ async fn main() -> Result<()> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(2000);
 
-    let client = YouTubeClient::new(Arc::new(YtMusic::anonymous()));
     let providers = providers();
 
     let query = std::env::var("FIND").unwrap_or_else(|_| "top hits".to_owned());
     if std::env::var("FIND").is_ok() {
-        for track in client.search(&query).await?.into_iter().take(sample) {
+        for track in corpus(&query).await?.into_iter().take(sample) {
             eprintln!("{} - {} ({:?})", track.name, track.artists, track.duration);
             inspect(&measure(&track, &providers).await);
         }
@@ -64,7 +59,7 @@ async fn main() -> Result<()> {
     }
 
     let started = Instant::now();
-    let mut saved = client.search(&query).await?;
+    let mut saved = corpus(&query).await?;
     saved.truncate(limit);
     eprintln!(
         "search hits: {} fetched in {:?}",
@@ -110,17 +105,50 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// The bench corpus: what LrcLib turns up for the query, as plain tracks to measure over.
+async fn corpus(query: &str) -> Result<Vec<Track>> {
+    let hits = lrclib::LrcLib::new()
+        .search(&LyricsQuery {
+            title: query.to_owned(),
+            artist: String::new(),
+            album: None,
+            duration: Duration::ZERO,
+            track: None,
+        })
+        .await?;
+    Ok(hits
+        .into_iter()
+        .map(|hit| Track {
+            id: None,
+            name: hit.title,
+            playable: true,
+            artists: hit.artist,
+            artist_refs: Vec::new(),
+            album: hit.album.unwrap_or_default(),
+            album_id: None,
+            cover: None,
+            duration: hit.duration.unwrap_or_default(),
+            added_at: None,
+            added_by: None,
+            playcount: None,
+            popularity: 0,
+            explicit: false,
+            track_number: 0,
+            disc_number: 0,
+            tags: Vec::new(),
+            languages: Vec::new(),
+            credits: Vec::new(),
+        })
+        .collect())
+}
+
 async fn measure(track: &Track, providers: &[Arc<dyn LyricsProvider>]) -> Row {
-    let id = track.id.clone().unwrap_or_default();
     let query = LyricsQuery {
         title: track.name.clone(),
         artist: track.artists.clone(),
         album: (!track.album.is_empty()).then(|| track.album.clone()),
         duration: track.duration,
-        track: Some(TrackKey {
-            provider: "youtube",
-            id: id.clone(),
-        }),
+        track: None,
     };
 
     let mut tasks = tokio::task::JoinSet::new();

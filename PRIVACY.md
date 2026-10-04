@@ -6,7 +6,7 @@ Sonora sends no telemetry, analytics, or installation reports anywhere.
 
 ## Streaming and third-party services
 
-When you use YouTube Music, Deezer, lyrics providers, or other online integrations, Sonora communicates with those third-party services as necessary to provide the requested functionality.
+When you use Deezer, lyrics providers, or other online integrations, Sonora communicates with those third-party services as necessary to provide the requested functionality.
 
 Data handled by those services is subject to their respective privacy policies and terms.
 

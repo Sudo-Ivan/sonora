@@ -25,7 +25,7 @@
 
   <description>
     <p>
-      Sonora streams YouTube Music, Deezer and your own servers and plays your local files from one native
+      Sonora streams Deezer and your own servers and plays your local files from one native
       desktop app built with Rust and GPUI, with lyrics, artist pages, playlists, and
       system media controls.
     </p>

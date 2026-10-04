@@ -55,7 +55,7 @@ in
       type = json.type;
       default = { };
       example = {
-        provider = "youtube";
+        provider = "deezer";
         gapless = true;
         appearance = {
           theme = "dark";

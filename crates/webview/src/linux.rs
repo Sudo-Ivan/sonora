@@ -35,7 +35,7 @@ const SETUP: Duration = Duration::from_secs(5);
 const DRM: &str = "/sys/class/drm";
 
 /// Firefox on Linux. WebKitGTK's own agent claims Safari on X11, a browser that does not exist,
-/// and Google answers a browser it cannot place with "this browser may not be secure".
+/// and a sign-in page can refuse a browser it cannot place as "this browser may not be secure".
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:134.0) Gecko/20100101 Firefox/134.0";
 
 const GTK_WINDOW_TOPLEVEL: c_int = 0;
@@ -46,11 +46,6 @@ const G_SOURCE_CONTINUE: Bool = 1;
 /// the other two backends take every cookie, and a session that dies with the window has no third
 /// party worth keeping out.
 const WEBKIT_COOKIE_POLICY_ACCEPT_ALWAYS: c_int = 0;
-/// `WEBKIT_USER_CONTENT_INJECT_TOP_FRAME`: the script runs in the page and in none of its frames.
-const WEBKIT_USER_CONTENT_INJECT_TOP_FRAME: c_int = 0;
-/// `WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START`: before the page's own scripts, which is what a
-/// script that has to intercept one of them needs.
-const WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START: c_int = 0;
 
 type Ptr = *mut c_void;
 type Bool = c_int;
@@ -124,10 +119,6 @@ symbols! {
     webkit_web_context_get_cookie_manager: unsafe extern "C" fn(Ptr) -> Ptr,
     webkit_web_view_new_with_context: unsafe extern "C" fn(Ptr) -> Ptr,
     webkit_web_view_get_settings: unsafe extern "C" fn(Ptr) -> Ptr,
-    webkit_web_view_get_user_content_manager: unsafe extern "C" fn(Ptr) -> Ptr,
-    webkit_user_content_manager_add_script: unsafe extern "C" fn(Ptr, Ptr),
-    webkit_user_script_new: unsafe extern "C" fn(*const c_char, c_int, c_int, *const *const c_char, *const *const c_char) -> Ptr,
-    webkit_user_script_unref: unsafe extern "C" fn(Ptr),
     webkit_web_view_get_uri: unsafe extern "C" fn(Ptr) -> *const c_char,
     webkit_web_view_load_uri: unsafe extern "C" fn(Ptr, *const c_char),
     webkit_web_view_terminate_web_process: unsafe extern "C" fn(Ptr),
@@ -395,14 +386,7 @@ impl Live {
             )
         };
 
-        if let Some(source) = &session.target.script {
-            inject(api, view, source);
-        }
-        // A scripted window is never looked at. GTK only needs it mapped for the user to see it,
-        // and WebKit loads a page into an unmapped view all the same, so it stays hidden.
-        if !session.target.scripted() {
-            unsafe { (api.gtk_widget_show_all)(window) };
-        }
+        unsafe { (api.gtk_widget_show_all)(window) };
         unsafe { (api.webkit_web_view_load_uri)(view, url.as_ptr()) };
 
         Ok(Self {
@@ -481,35 +465,6 @@ fn load() -> Option<Api> {
         }
     }
     None
-}
-
-/// Adds a user script to a view, to run in every page it loads once that page's own scripts have.
-/// The script is copied into the content manager, so the one built here is released straight away.
-fn inject(api: &'static Api, view: Ptr, source: &str) {
-    let Ok(source) = CString::new(source) else {
-        log::warn!("webview: the page script is not text");
-        return;
-    };
-    let manager = unsafe { (api.webkit_web_view_get_user_content_manager)(view) };
-    if manager.is_null() {
-        log::warn!("webview: the view has no content manager, the page script will not run");
-        return;
-    }
-    let script = unsafe {
-        (api.webkit_user_script_new)(
-            source.as_ptr(),
-            WEBKIT_USER_CONTENT_INJECT_TOP_FRAME,
-            WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
-            ptr::null(),
-            ptr::null(),
-        )
-    };
-    if script.is_null() {
-        log::warn!("webview: cannot build the page script");
-        return;
-    }
-    unsafe { (api.webkit_user_content_manager_add_script)(manager, script) };
-    unsafe { (api.webkit_user_script_unref)(script) };
 }
 
 /// Resolves one symbol. `dlsym` searches the handle's dependencies too, which is how gtk, glib and

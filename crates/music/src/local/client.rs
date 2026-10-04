@@ -805,7 +805,7 @@ mod tests {
             let conn = db.open().unwrap();
             conn.execute(
                 "INSERT INTO plays (scope, provider, track_id, played_at, name, playable, artists, artist_refs, album, album_id, cover, duration_ms, explicit)
-                 VALUES ('youtube:youtube-guest', 'local', 'local:2', 1000, 'Track 2', 1, 'Artist 2', '[]', 'Album', NULL, NULL, 180000, 0)",
+                 VALUES ('deezer:deezer-account', 'local', 'local:2', 1000, 'Track 2', 1, 'Artist 2', '[]', 'Album', NULL, NULL, 180000, 0)",
                 [],
             ).unwrap();
         }

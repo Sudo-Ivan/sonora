@@ -2,12 +2,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, Result, bail};
-use music::youtube::YouTubeClient;
-use music::{
-    Lyrics, LyricsHit, LyricsProvider, LyricsQuery, MusicApi, Track, TrackKey, kugou, lrclib,
-    musixmatch, netease,
-};
-use ytmusic::YtMusic;
+use music::{Lyrics, LyricsHit, LyricsProvider, LyricsQuery, kugou, lrclib, musixmatch, netease};
 
 const LISTED: usize = 4;
 
@@ -20,7 +15,6 @@ struct Probe {
 
 fn providers() -> Vec<Arc<dyn LyricsProvider>> {
     vec![
-        Arc::new(music::youtube::YouTubeLyrics::new()),
         Arc::new(musixmatch::Musixmatch::new()),
         Arc::new(lrclib::LrcLib::new()),
         Arc::new(kugou::Kugou::new()),
@@ -34,30 +28,18 @@ async fn main() -> Result<()> {
         .install_default()
         .ok();
 
-    let Some(link) = std::env::args().nth(1) else {
-        bail!("usage: lyrics-prober <youtube link or a search query>");
+    let Some(lookup) = std::env::args().nth(1) else {
+        bail!("usage: lyrics-prober <search query>");
     };
 
-    let (track, provider) = resolve(&link).await?;
-    let query = LyricsQuery {
-        title: track.name.clone(),
-        artist: track.artists.clone(),
-        album: (!track.album.is_empty()).then(|| track.album.clone()),
-        duration: track.duration,
-        track: track.id.clone().map(|id| TrackKey { provider, id }),
-    };
+    let query = resolve(&lookup).await?;
 
     println!(
-        "{} - {} [{}] {} ({})",
-        track.name,
-        track.artists,
-        track.album,
-        clock(track.duration),
-        track
-            .id
-            .as_deref()
-            .map(|id| format!("{provider}:{id}"))
-            .unwrap_or_else(|| "no id".to_owned()),
+        "{} - {} [{}] {}",
+        query.title,
+        query.artist,
+        query.album.as_deref().unwrap_or(""),
+        clock(query.duration),
     );
     println!();
 
@@ -119,23 +101,29 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn resolve(link: &str) -> Result<(Track, &'static str)> {
-    let client = YouTubeClient::new(Arc::new(YtMusic::anonymous()));
-    let track = match youtube_id(link) {
-        Some(id) => client
-            .track(&id)
-            .await
-            .context("cannot look the video up as a guest")?,
-        None => client
-            .search(link)
-            .await
-            .context("cannot search for the track")?
-            .into_iter()
-            .next()
-            .context("nothing found for that query")?,
-    };
-
-    Ok((track, "youtube"))
+/// Resolves a free-form query into the canonical title, artist, album and duration LrcLib
+/// knows it by, so the probes run against real metadata rather than the words as typed.
+async fn resolve(lookup: &str) -> Result<LyricsQuery> {
+    let hit = lrclib::LrcLib::new()
+        .search(&LyricsQuery {
+            title: lookup.to_owned(),
+            artist: String::new(),
+            album: None,
+            duration: Duration::ZERO,
+            track: None,
+        })
+        .await
+        .context("cannot look the song up on lrclib")?
+        .into_iter()
+        .next()
+        .context("nothing found for that query")?;
+    Ok(LyricsQuery {
+        title: hit.title,
+        artist: hit.artist,
+        album: hit.album,
+        duration: hit.duration.unwrap_or_default(),
+        track: None,
+    })
 }
 
 async fn probe(query: &LyricsQuery) -> Vec<Probe> {
@@ -234,21 +222,4 @@ fn shape(lyrics: &Lyrics) -> String {
 fn clock(duration: Duration) -> String {
     let seconds = duration.as_secs();
     format!("{}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn youtube_id(link: &str) -> Option<String> {
-    if let Some(rest) = link.split("youtu.be/").nth(1) {
-        return Some(cut(rest));
-    }
-    if !link.contains("youtube.com") && !link.contains("music.youtube.com") {
-        return None;
-    }
-    link.split("v=").nth(1).map(cut)
-}
-
-fn cut(rest: &str) -> String {
-    rest.split(['?', '&', '/', '#'])
-        .next()
-        .unwrap_or(rest)
-        .to_owned()
 }

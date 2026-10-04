@@ -368,9 +368,7 @@ impl Default for Values {
             lyrics_for_local_files: true,
             prefer_local_lyrics: false,
             local_lyrics_offered: false,
-            lyrics_providers: [LOCAL, "YouTube Music", "Musixmatch", "LrcLib"]
-                .map(str::to_owned)
-                .to_vec(),
+            lyrics_providers: [LOCAL, "Musixmatch", "LrcLib"].map(str::to_owned).to_vec(),
             karaoke_lyrics: true,
             blur_lyrics: true,
             romanized_lyrics: true,
@@ -444,7 +442,7 @@ impl Default for StateValues {
             repeat: Repeat::Off,
             radio: false,
             forever: false,
-            provider: "youtube".to_owned(),
+            provider: String::new(),
             tables: HashMap::new(),
             sorting: HashMap::new(),
             filters: HashMap::new(),
@@ -2326,7 +2324,7 @@ mod tests {
     #[test]
     fn another_provider_never_inherits_a_position() {
         let previous = resume("deezer", "abc", 42.);
-        let mut next = resume("youtube", "abc", 0.);
+        let mut next = resume("subsonic", "abc", 0.);
 
         carry(Some(&previous), &mut next);
 
@@ -2371,7 +2369,7 @@ mod tests {
         let store = StateStore::new(Database::at(path.clone()));
         let state = StateValues {
             volume: 0.2,
-            provider: "youtube".to_owned(),
+            provider: "subsonic".to_owned(),
             sidebar_right_open: true,
             pinned: vec![held("deezer", "album")],
             ..StateValues::default()
@@ -2381,7 +2379,7 @@ mod tests {
         let loaded = store.load().expect("state loads").expect("state exists");
 
         assert_eq!(loaded.volume, 0.2);
-        assert_eq!(loaded.provider, "youtube");
+        assert_eq!(loaded.provider, "subsonic");
         assert!(loaded.sidebar_right_open);
         assert_eq!(loaded.pinned.len(), 1);
 

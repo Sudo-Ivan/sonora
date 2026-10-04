@@ -7,8 +7,8 @@
 //! join, where a position is reported from, and what a lost output device does.
 //!
 //! A provider supplies [`Fetch`]: how to get a track and how to open a decoder over it. Local
-//! reads a file from disk, YouTube downloads the whole track, Subsonic hands over a plain
-//! response, and Deezer decrypts Blowfish stripes as they arrive.
+//! reads a file from disk, Subsonic hands over a plain response, and Deezer decrypts Blowfish
+//! stripes as they arrive.
 //!
 //! Loudness normalisation lives here too. A provider only reports how loud a track is, and the
 //! engine decides what gain that earns.

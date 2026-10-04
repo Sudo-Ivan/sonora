@@ -13,7 +13,6 @@ mod mosaic;
 mod network;
 mod pins;
 mod playback;
-mod potoken;
 mod profile;
 mod queue;
 mod remote;
@@ -163,9 +162,6 @@ pub struct Sonora {
     pub network: Entity<Network>,
     pub pins: Entity<Pins>,
     pub playback: Entity<Playback>,
-    /// The window that mints YouTube's proof-of-origin token. Nothing reads it; it is held so
-    /// that it keeps ticking.
-    pub potoken: Entity<potoken::PoToken>,
     pub queue: Entity<Queue>,
     pub scan: Entity<Scan>,
     pub scrobbling: Entity<Scrobbling>,
@@ -261,7 +257,6 @@ pub fn init(
     let cover = cx.new(|cx| Cover::new(session.clone(), playback.clone(), io.clone(), cx));
     let updates = cx.new(|cx| Updates::new(settings.clone(), io.clone(), cx));
     let pins = cx.new(|cx| Pins::new(settings.clone(), library.clone(), session.clone(), cx));
-    let potoken = potoken::attach(cx);
     let wake = cx.new(|cx| Wake::new(settings.clone(), playback.clone(), io.clone(), cx));
 
     cx.set_global(Sonora {
@@ -273,7 +268,6 @@ pub fn init(
         network,
         pins,
         playback,
-        potoken,
         queue,
         scan,
         scrobbling,

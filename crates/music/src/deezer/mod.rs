@@ -127,7 +127,6 @@ impl MusicProvider for DeezerProvider {
                 let cookies = input.recv().await.context("sign-in was cancelled")?;
                 Self::connect(&cookies).await
             }
-            SignIn::Anonymous => Err(anyhow::anyhow!("deezer has no anonymous sign-in")),
             SignIn::Path(_) => Err(anyhow::anyhow!(
                 "deezer does not sign in with a folder path"
             )),

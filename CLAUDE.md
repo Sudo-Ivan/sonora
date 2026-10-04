@@ -18,7 +18,7 @@ crates/
   i18n/       Fluent localization: the `t!` macro, locale selection, embedded .ftl
   icons/      the icon packs: registry, active pack, path resolution, AssetSource
   embed/      build-script helper that walks a folder and writes include_bytes! literals
-  webview/    a native browser window over a throwaway session, for cookie sign-ins and PO tokens
+  webview/    a native browser window over a throwaway session, for cookie sign-ins
 ```
 
 Dependency direction is strict. Do not create a back edge:

@@ -47,7 +47,7 @@ we can.
 ## A lying Xing frame count (`wire::has_lying_xing_frame_count`)
 
 Some mp3s carry a Xing/Info VBR header with a declared frame count of `0` instead of omitting it -
-seen on files an old `ffmpeg`/`libavformat` (`Lavf54.20.4`) remuxed from a DASH/YouTube source,
+seen on files an old `ffmpeg`/`libavformat` (`Lavf54.20.4`) remuxed from a streamed DASH source,
 which never goes back to patch the real count into a non-seekable pipe output. `symphonia` trusts
 that count for gapless trimming: a declared `0` trims every packet in the track down to nothing, so
 the file loads with no error and then plays silence end to end even though the MPEG frames that

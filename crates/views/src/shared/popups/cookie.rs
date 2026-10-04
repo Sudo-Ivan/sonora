@@ -8,65 +8,23 @@ use crate::shared::steps::steps;
 
 type Action = Rc<dyn Fn(&(), &mut Window, &mut App)>;
 
-/// The walkthrough for one provider's manual cookie sign-in: the page to send the user to
-/// and the keys of every string the dialog shows. A provider whose sign-in is one cookie
-/// found by name shares the parametrized flow; a provider needing a whole request header
-/// names its own steps, with the title and the opener shared by every provider.
-struct Guide {
-    url: &'static str,
-    title: &'static str,
-    hint: &'static str,
-    steps: [&'static str; 4],
-    note: &'static str,
-}
-
-const YOUTUBE: Guide = Guide {
-    url: "https://music.youtube.com",
-    title: "login-cookie-header-title",
-    hint: "login-cookie-hint",
-    steps: [
-        "login-cookie-step-1",
-        "login-cookie-step-2",
-        "login-cookie-step-3",
-        "login-cookie-step-4",
-    ],
-    note: "login-cookie-step-note",
-};
-
-const DEEZER: Guide = Guide {
-    url: "https://www.deezer.com",
-    title: "login-cookie-named-title",
-    hint: "login-cookie-named-hint",
-    steps: [
-        "login-cookie-named-step-1",
-        "login-cookie-named-step-2",
-        "login-cookie-named-step-3",
-        "login-cookie-named-step-4",
-    ],
-    note: "login-cookie-named-note",
-};
-
-/// The guide for a provider slug. YouTube's is the fallback: pasting a whole request header
-/// needs no cookie name, so its wording fits any header paste.
-fn guide(slug: &str) -> &'static Guide {
-    match slug {
-        "deezer" => &DEEZER,
-        _ => &YOUTUBE,
-    }
-}
-
-/// The site the devtools show and the cookie to copy, for the flows whose strings name them.
-/// YouTube's header flow needs neither, so it carries no entry here.
-fn named(slug: &str) -> Option<(&'static str, &'static str)> {
-    match slug {
-        "deezer" => Some(("www.deezer.com", "arl")),
-        _ => None,
-    }
-}
+/// The walkthrough for the manual cookie sign-in: the page to send the user to, the site the
+/// devtools open and the cookie to copy, plus the keys of every string the dialog shows.
+const URL: &str = "https://www.deezer.com";
+const SITE: &str = "www.deezer.com";
+const COOKIE: &str = "arl";
+const TITLE: &str = "login-cookie-named-title";
+const HINT: &str = "login-cookie-named-hint";
+const STEPS: [&str; 4] = [
+    "login-cookie-named-step-1",
+    "login-cookie-named-step-2",
+    "login-cookie-named-step-3",
+    "login-cookie-named-step-4",
+];
+const NOTE: &str = "login-cookie-named-note";
 
 #[derive(IntoElement)]
 pub(crate) struct CookiePrompt {
-    slug: &'static str,
     provider: &'static str,
     secret: Entity<Input>,
     submit: Option<Action>,
@@ -74,9 +32,8 @@ pub(crate) struct CookiePrompt {
 }
 
 impl CookiePrompt {
-    pub(crate) fn new(slug: &'static str, provider: &'static str, secret: Entity<Input>) -> Self {
+    pub(crate) fn new(provider: &'static str, secret: Entity<Input>) -> Self {
         Self {
-            slug,
             provider,
             secret,
             submit: None,
@@ -84,10 +41,10 @@ impl CookiePrompt {
         }
     }
 
-    /// The hint key the paste field should carry for a provider, set on the input when the
-    /// manual sign-in starts so it follows the language like every other hint.
-    pub(crate) fn hint(slug: &str) -> &'static str {
-        guide(slug).hint
+    /// The hint key the paste field carries, set on the input when the manual sign-in starts
+    /// so it follows the language like every other hint.
+    pub(crate) fn hint() -> &'static str {
+        HINT
     }
 
     pub(crate) fn on_submit(
@@ -110,38 +67,33 @@ impl CookiePrompt {
 impl RenderOnce for CookiePrompt {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let Self {
-            slug,
             provider,
             secret,
             submit,
             cancel,
+            ..
         } = self;
         let dismissed = cancel.clone();
         let theme = *cx.theme();
-        let guide = guide(slug);
 
         let mut args = FluentArgs::new();
         args.set("provider", provider.value());
-        if let Some((site, cookie)) = named(slug) {
-            args.set("site", site.value());
-            args.set("cookie", cookie.value());
-        }
+        args.set("site", SITE.value());
+        args.set("cookie", COOKIE.value());
 
-        Modal::new("cookie-prompt", lookup(guide.title, Some(&args)))
+        Modal::new("cookie-prompt", lookup(TITLE, Some(&args)))
             .w(px(560.))
             .child(
                 Button::new("open-cookie-provider")
                     .label(lookup("login-cookie-open", Some(&args)))
                     .icon("icons/external-link.svg")
                     .outline()
-                    .on_click(move |_, _, cx| cx.open_url(guide.url)),
+                    .on_click(move |_, _, cx| cx.open_url(URL)),
             )
-            .child(steps(
-                guide.steps.iter().map(|key| lookup(key, Some(&args))),
-            ))
+            .child(steps(STEPS.iter().map(|key| lookup(key, Some(&args)))))
             .child(
                 div()
-                    .child(lookup(guide.note, Some(&args)))
+                    .child(lookup(NOTE, Some(&args)))
                     .flex_1()
                     .min_w_0()
                     .text_size(theme.text(Text::Small))

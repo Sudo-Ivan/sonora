@@ -5,15 +5,12 @@ pub mod engine;
 pub mod equalizer;
 pub mod escape;
 pub mod kugou;
-#[cfg(test)]
-mod live_tests;
 pub mod local;
 pub mod lrclib;
 pub mod lyrics;
 mod models;
 pub mod musixmatch;
 pub mod netease;
-pub mod potoken;
 pub mod progress;
 pub mod scrobble;
 mod sink;
@@ -21,9 +18,7 @@ mod spectrum;
 mod stream;
 pub mod subsonic;
 pub mod tls;
-mod trim;
 pub mod trouble;
-pub mod youtube;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -512,7 +507,6 @@ pub struct ProviderSession {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SignIn {
     Default,
-    Anonymous,
     Secret,
     Path(Vec<PathBuf>),
     Credentials {
@@ -555,15 +549,7 @@ impl std::fmt::Display for SignInFailure {
 impl std::error::Error for SignInFailure {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AccountChoice {
-    pub id: String,
-    pub name: String,
-    pub detail: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SignInPrompt {
-    Accounts(Vec<AccountChoice>),
     Code { code: String, url: String },
     Url(String),
     Secret,
@@ -662,11 +648,6 @@ pub trait MusicProvider: Send + Sync {
     fn forget_scan(&self) {}
     fn sign_in_options(&self) -> Vec<SignIn>;
     fn stored(&self) -> bool;
-    /// Whether what is stored is an anonymous session rather than an account, so a caller
-    /// can tell the two apart. A provider without an anonymous sign-in never says yes.
-    fn stored_guest(&self) -> bool {
-        false
-    }
     fn location(&self) -> Option<String> {
         None
     }
@@ -707,6 +688,6 @@ mod tests {
         ] {
             assert!(is_local_id(id), "{id}");
         }
-        assert!(!is_local_id("youtube:abc"));
+        assert!(!is_local_id("deezer:abc"));
     }
 }

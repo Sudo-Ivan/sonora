@@ -1,4 +1,3 @@
-pub(crate) mod catalog;
 mod japanese;
 pub mod lrc;
 pub(crate) mod romanize;

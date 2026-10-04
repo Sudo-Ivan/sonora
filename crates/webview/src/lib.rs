@@ -1,24 +1,21 @@
-//! A native browser window with a throwaway session, for the two jobs that need a real engine.
+//! A native browser window with a throwaway session, for the one job that needs a real engine.
 //!
 //! The window loads a page in a data store that lives only as long as the window. Once the proof
 //! cookies appear, their header is handed back and the window closes. No browser profile ever
 //! holds that session, so nothing rotates the cookies behind the app's back the way a shared
 //! browser session does.
 //!
-//! The first job is signing in: the user works through the provider's pages and the proof cookies
-//! are the session. The second is running a script on a page the app cannot reach any other way,
-//! which is how YouTube's proof-of-origin token is minted; that window is hidden and its script
-//! leaves the answer in a cookie the same poll reads.
+//! The job is signing in: the user works through the provider's pages and the proof cookies are
+//! the session.
 //!
-//! An account provider can finish the sign-in on an interstitial of its own - Google's security
+//! An account provider can finish the sign-in on an interstitial of its own - a security
 //! check-up, say - that jumps straight to the return url and skips the hop that hands the account
 //! to the provider's domain. The page then comes up signed out. When that happens, the sign-in url
 //! is loaded once more: with the account already in, it only runs the hop that was skipped, which
 //! is exactly what the page's own Sign in button would do.
 //!
 //! macOS, Windows and Linux have native backends. Every other platform reports
-//! `supported() == false` and `Page::open` fails, so a caller falls back to pasting a header or
-//! goes without a token.
+//! `supported() == false` and `Page::open` fails, so a caller falls back to pasting a header.
 
 use anyhow::Result;
 
@@ -48,12 +45,6 @@ use unsupported as platform;
 /// What a window is asked to do. `url` opens first. `landing` scopes cookie reads on platforms
 /// whose cookie store asks for a URL. The window is done as soon as the cookies for `domain`
 /// carry at least one of the `proof` names.
-///
-/// Two kinds of window fit this. A sign-in window is shown and carries no script: the user works
-/// through the provider's pages and the proof cookies are the session. A scripted window is
-/// hidden and runs `script` on every page it loads, which does its work and leaves the answer in
-/// a cookie named in `proof`; nothing about it is a sign-in, and the retry that recovers a
-/// skipped hand-off is left out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
     pub url: String,
@@ -64,16 +55,6 @@ pub struct Target {
     /// A user agent the window presents instead of the backend's default, when the provider
     /// needs one that matches the engine the backend drives.
     pub agent: Option<String>,
-    /// Javascript to run in every page the window loads, before the page's own scripts. A window
-    /// with one is a scripted window and is never shown.
-    pub script: Option<String>,
-}
-
-impl Target {
-    /// Whether this target is a background page rather than a window the user works in.
-    pub(crate) fn scripted(&self) -> bool {
-        self.script.is_some()
-    }
 }
 
 /// One cookie as the page holds it. `domain` keeps the leading dot when the browser stored one.
@@ -146,10 +127,9 @@ impl Page {
 
     /// Loads the sign-in url again when the page is on the provider's domain without a session,
     /// once. Any page of the domain counts, not only the landing: a skipped hand-off can end on
-    /// an error page of the provider's just as well. A scripted window has no hand-off to
-    /// recover, and reloading would only throw away the work its script is in the middle of.
+    /// an error page of the provider's just as well.
     fn retry(&mut self) {
-        if self.retried || self.target.scripted() {
+        if self.retried {
             return;
         }
         let Some(host) = self.window.host() else {
@@ -204,30 +184,30 @@ mod tests {
 
     #[test]
     fn keeps_the_domain_and_its_subdomains() {
-        assert!(matches(".youtube.com", "youtube.com"));
-        assert!(matches("youtube.com", "youtube.com"));
-        assert!(matches("music.youtube.com", "youtube.com"));
-        assert!(!matches(".google.com", "youtube.com"));
-        assert!(!matches("notyoutube.com", "youtube.com"));
+        assert!(matches(".deezer.com", "deezer.com"));
+        assert!(matches("deezer.com", "deezer.com"));
+        assert!(matches("www.deezer.com", "deezer.com"));
+        assert!(!matches(".deezer.com", "other.com"));
+        assert!(!matches("notdeezer.com", "deezer.com"));
     }
 
     #[test]
     fn joins_only_the_matching_cookies() {
         let cookies = [
-            cookie("SAPISID", ".youtube.com"),
-            cookie("NID", ".google.com"),
-            cookie("PREF", "music.youtube.com"),
+            cookie("arl", ".deezer.com"),
+            cookie("NID", ".other.com"),
+            cookie("PREF", "www.deezer.com"),
         ];
         assert_eq!(
-            header(&cookies, "youtube.com"),
-            "SAPISID=SAPISID-value; PREF=PREF-value"
+            header(&cookies, "deezer.com"),
+            "arl=arl-value; PREF=PREF-value"
         );
     }
 
     #[test]
     fn proof_needs_one_of_the_names() {
-        let proof = vec!["SAPISID".to_string(), "__Secure-3PAPISID".to_string()];
-        assert!(proven("VISITOR=1; __Secure-3PAPISID=x", &proof));
+        let proof = vec!["arl".to_string(), "session".to_string()];
+        assert!(proven("VISITOR=1; session=x", &proof));
         assert!(!proven("VISITOR=1; PREF=x", &proof));
         assert!(!proven("", &proof));
     }

@@ -46,7 +46,7 @@ A fork of [sonorahq/sonora](https://github.com/sonorahq/sonora); see [FORK.md](F
 
 ## Features
 
-* **YouTube Music, Deezer, Subsonic/Navidrome** and local playback
+* **Deezer, Subsonic/Navidrome** and local playback
 * Gapless playback, audio normalization, shuffle, sleep timer
 * Synced/karaoke lyrics, background vocals, and romanization
 * Scrobbling with LastFM, ListenBrainz, LibreFM, and Maloja
@@ -116,7 +116,7 @@ You can set configuration options via the included Home Manager module under `pr
   programs.sonora = {
     enable = true;
     settings = {
-      provider = "youtube";
+      provider = "deezer";
       appearance.theme = "dark";
     };
   };
@@ -186,7 +186,6 @@ Releases are published once and never modified afterwards.
 Sonora is built with the help of some incredible open-source projects, including:
 
 - [Zed](https://github.com/zed-industries/zed) - a wonderful editor (~~ab~~)used by all core team members. Conveniently provides `gpui` - their native Rust rendering stack.
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - certain YouTube ideas implemented in [ytmusic-rs](https://github.com/sonorahq/ytmusic-rs) :)
 
 ## License
 

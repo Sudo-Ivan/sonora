@@ -1,4 +1,3 @@
-mod accounts;
 mod cookie;
 
 use std::cell::{Cell, RefCell};
@@ -11,7 +10,6 @@ use gpui::{
 };
 use ui::{Input, Menu, Picker, Scrollbar, SelectNext, SelectPrevious, Submit};
 
-pub(crate) use accounts::AccountPicker;
 pub(crate) use cookie::CookiePrompt;
 
 const SEARCH_HEIGHT: Pixels = px(320.);

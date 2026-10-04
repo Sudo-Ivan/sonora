@@ -327,7 +327,7 @@ impl Pins {
 
     /// The provider's own uri for a pin, when the provider keeps pins itself. A listed item
     /// keeps the uri it was listed with, and the provider builds one for anything else. A
-    /// provider that keeps no pins, as YouTube does, answers `None`, so the pin stays a local
+    /// provider that keeps no pins answers `None`, so the pin stays a local
     /// one rather than failing on a call it cannot make.
     fn remote(&self, pin: &Pin, cx: &App) -> Option<String> {
         let session = self.session.read(cx);

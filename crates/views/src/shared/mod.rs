@@ -31,7 +31,6 @@ pub(crate) fn effects() -> bool {
 
 pub(crate) fn provider_logo(slug: &str) -> &'static str {
     match slug {
-        "youtube" => "icons/youtubemusic.svg",
         "subsonic" => "icons/subsonic.svg",
         "deezer" => "icons/deezer.svg",
         _ => "icons/music.svg",

@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- YouTube Music support is gone: the provider, its guest mode, the browser sign-in and the
+  proof-of-origin token window are all removed. A stored YouTube session is simply no longer
+  offered, and Deezer and Subsonic remain.
+
 ## [0.42.10] - 2026-10-04
 
 ### Fixed

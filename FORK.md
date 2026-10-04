@@ -106,6 +106,6 @@ not listed below is inherited from upstream.
 
 ## Still upstream
 
-The library forks under `github.com/sonorahq` (`gpui`, `ytmusic-rs`) stay pinned
+The library fork under `github.com/sonorahq` (`gpui`) stays pinned
 dependencies: upstream maintains them for this code base and they carry changes its
 own projects depend on. The `librespot` fork is gone with the Spotify provider.
