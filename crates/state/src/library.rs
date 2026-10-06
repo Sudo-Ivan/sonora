@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use anyhow::Context as _;
 use gpui::{App, Context, Entity, SharedString, Task};
 use music::{Album, MediaKind, MusicApi, Page, Pages, Playlist, SavedArtist, Shape, Track};
 
@@ -461,6 +462,112 @@ fn mix_stamp(held: &Held, favorites: &[Track], day: u64) -> u64 {
     stamp
 }
 
+/// What kind of item an ignore entry names, stored as the kind column of the ignored table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ignore {
+    Track,
+    Album,
+    Artist,
+}
+
+impl Ignore {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Track => "track",
+            Self::Album => "album",
+            Self::Artist => "artist",
+        }
+    }
+}
+
+/// The ids the listener chose to keep out of mixes, picks and the forever queue, per kind.
+#[derive(Default)]
+struct Ignored {
+    tracks: HashSet<String>,
+    albums: HashSet<String>,
+    artists: HashSet<String>,
+}
+
+impl Ignored {
+    fn has(&self, kind: Ignore, id: &str) -> bool {
+        match kind {
+            Ignore::Track => self.tracks.contains(id),
+            Ignore::Album => self.albums.contains(id),
+            Ignore::Artist => self.artists.contains(id),
+        }
+    }
+
+    fn set(&mut self, kind: Ignore, id: &str, on: bool) {
+        let set = match kind {
+            Ignore::Track => &mut self.tracks,
+            Ignore::Album => &mut self.albums,
+            Ignore::Artist => &mut self.artists,
+        };
+        match on {
+            true => set.insert(id.to_owned()),
+            false => set.remove(id),
+        };
+    }
+}
+
+/// Reads the ignored table, which mirrors the favorites tables: a missing or unreadable row
+/// set means nothing is ignored rather than a hard failure.
+fn load_ignored() -> Ignored {
+    let read = || -> anyhow::Result<Ignored> {
+        let connection = storage::Database::standard()
+            .open()
+            .context("cannot open ignored items")?;
+        let mut query = connection
+            .prepare("SELECT kind, id FROM ignored")
+            .context("cannot read ignored items")?;
+        let rows = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .context("cannot read ignored items")?;
+        let mut ignored = Ignored::default();
+        for row in rows {
+            let (kind, id) = row.context("cannot read ignored items")?;
+            match kind.as_str() {
+                "track" => ignored.tracks.insert(id),
+                "album" => ignored.albums.insert(id),
+                "artist" => ignored.artists.insert(id),
+                _ => false,
+            };
+        }
+        Ok(ignored)
+    };
+    read().unwrap_or_else(|error| {
+        log::warn!("library: {error:#}");
+        Ignored::default()
+    })
+}
+
+/// Persists one ignore toggle to the ignored table. Runs on a background thread while the
+/// memory set answers reads.
+fn write_ignored(kind: &'static str, id: String, on: bool) {
+    let write = || -> anyhow::Result<()> {
+        let connection = storage::Database::standard()
+            .open()
+            .context("cannot open ignored items")?;
+        match on {
+            true => connection.execute(
+                "INSERT OR REPLACE INTO ignored (kind, id, ignored_at) VALUES (?, ?, ?)",
+                rusqlite::params![kind, id, stamp()],
+            ),
+            false => connection.execute(
+                "DELETE FROM ignored WHERE kind = ? AND id = ?",
+                rusqlite::params![kind, id],
+            ),
+        }
+        .context("cannot write ignored item")?;
+        Ok(())
+    };
+    if let Err(error) = write() {
+        log::warn!("library: {error:#}");
+    }
+}
+
 fn take<T>(
     part: LibraryPart,
     result: anyhow::Result<Vec<T>>,
@@ -807,6 +914,10 @@ pub struct Library {
     mixes: [RefCell<Dealt>; 2],
     /// Wakes the shelf's observers at each day's turn, so the Mixes page deals again.
     _daily: Option<Task<()>>,
+    /// The ignored ids, read from the ignored table on first use. None until then.
+    ignored: RefCell<Option<Ignored>>,
+    /// Bumped on every ignore toggle and folded into the mix stamp, so a toggle redeals at once.
+    ignored_rev: Cell<u64>,
 }
 
 impl Library {
@@ -894,6 +1005,8 @@ impl Library {
             priming: [None, None],
             mixes: [RefCell::new(None), RefCell::new(None)],
             _daily: Some(daily),
+            ignored: RefCell::new(None),
+            ignored_rev: Cell::new(0),
         };
         library.held_mut(Shelf::Streaming).state = LibraryState::Loading;
         library.held_mut(Shelf::Local).shape = Shape::Catalog;
@@ -1273,23 +1386,25 @@ impl Library {
     pub fn mixes(&self, shelf: Shelf, cx: &App) -> Rc<Vec<Mix>> {
         let day = mix::day();
         let held = self.held(shelf);
-        let stamp = mix_stamp(held, self.favorite_tracks(shelf), day);
+        let favorites = self.favorite_tracks(shelf);
+        let mut stamp = mix_stamp(held, favorites, day);
+        stamp = stamp.wrapping_mul(31).wrapping_add(self.ignored_rev.get());
         if let Some((saved, mixes)) = &*self.mixes[shelf.slot()].borrow()
             && *saved == stamp
         {
             return mixes.clone();
         }
 
-        let favorites: HashSet<String> = self
-            .favorite_tracks(shelf)
+        let favorites: HashSet<String> = favorites
             .iter()
+            .filter(|track| !self.blocked(track))
             .filter_map(|track| track.id.clone())
             .collect();
         let years: HashMap<&str, i32> = held
             .state
             .albums()
             .iter()
-            .filter(|album| album.year > 0)
+            .filter(|album| album.year > 0 && !self.ignored(Ignore::Album, &album.id))
             .map(|album| (album.id.as_str(), album.year))
             .collect();
         let recent: &[Track] = cx
@@ -1297,7 +1412,10 @@ impl Library {
             .map(|sonora| sonora.history.read(cx).tracks())
             .unwrap_or(&[]);
         let index = mix::Index::new(
-            held.state.tracks().iter(),
+            held.state
+                .tracks()
+                .iter()
+                .filter(|track| !self.blocked(track)),
             &favorites,
             &years,
             recent.iter(),
@@ -1310,6 +1428,57 @@ impl Library {
 
     fn favorites(&self, id: &str) -> Option<Favorites<'_>> {
         self.held(Shelf::of(id)).favorites()
+    }
+
+    /// The ignored set, reading the table on first use. The row count is small and reads are
+    /// rare (mix deals and toggles), so the load runs inline rather than holding a task.
+    fn ignored_set(&self) -> Ref<'_, Ignored> {
+        if self.ignored.borrow().is_none() {
+            *self.ignored.borrow_mut() = Some(load_ignored());
+        }
+        Ref::map(self.ignored.borrow(), |slot| slot.as_ref().unwrap())
+    }
+
+    /// Whether `id` was ignored, per kind.
+    pub fn ignored(&self, kind: Ignore, id: &str) -> bool {
+        self.ignored_set().has(kind, id)
+    }
+
+    /// Whether a track stays out of mixes, picks and the forever queue: ignored itself, or
+    /// under an album or an artist the listener ignored.
+    pub fn blocked(&self, track: &Track) -> bool {
+        let set = self.ignored_set();
+        track
+            .id
+            .as_deref()
+            .is_some_and(|id| set.has(Ignore::Track, id))
+            || track
+                .album_id
+                .as_deref()
+                .is_some_and(|id| set.has(Ignore::Album, id))
+            || track.artist_refs.iter().any(|artist| {
+                artist
+                    .id
+                    .as_deref()
+                    .is_some_and(|id| set.has(Ignore::Artist, id))
+            })
+    }
+
+    /// Toggles the ignore on one item. The table write goes out in the background while the
+    /// in-memory set answers reads at once; the bump redeals the shelf's mixes.
+    pub fn set_ignored(&mut self, kind: Ignore, id: &str, on: bool, cx: &mut Context<Self>) {
+        {
+            let mut slot = self.ignored.borrow_mut();
+            slot.get_or_insert_with(load_ignored).set(kind, id, on);
+        }
+        self.ignored_rev.set(self.ignored_rev.get().wrapping_add(1));
+        cx.background_executor()
+            .spawn({
+                let id = id.to_owned();
+                async move { write_ignored(kind.key(), id, on) }
+            })
+            .detach();
+        cx.notify();
     }
 
     pub fn pending(&self, track_id: &str) -> bool {

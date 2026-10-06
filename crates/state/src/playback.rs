@@ -89,8 +89,8 @@ use crate::queue::Queue;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AppSettings, Io, Mix, Network, Outcome, Session, SessionEvent, Shelf, Sonora, Target, Toasts,
-    join, mix,
+    AppSettings, Ignore, Io, Mix, Network, Outcome, Session, SessionEvent, Shelf, Sonora, Target,
+    Toasts, join, mix,
 };
 
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
@@ -814,17 +814,18 @@ impl Playback {
         let favorites: HashSet<String> = library
             .favorite_tracks(shelf)
             .iter()
+            .filter(|track| !library.blocked(track))
             .filter_map(|track| track.id.clone())
             .collect();
         let years: HashMap<&str, i32> = library
             .state(shelf)
             .albums()
             .iter()
-            .filter(|album| album.year > 0)
+            .filter(|album| album.year > 0 && !library.ignored(Ignore::Album, &album.id))
             .map(|album| (album.id.as_str(), album.year))
             .collect();
         let index = mix::Index::new(
-            pool.iter(),
+            pool.iter().filter(|track| !library.blocked(track)),
             &favorites,
             &years,
             sonora.history.read(cx).tracks().iter(),
@@ -1604,6 +1605,7 @@ impl Playback {
             let pool: Vec<&Track> = shelves
                 .into_iter()
                 .flat_map(|shelf| library.state(shelf).tracks().iter())
+                .filter(|track| !library.blocked(track))
                 .collect();
             let mut favorites = HashSet::new();
             let mut years = HashMap::new();

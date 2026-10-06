@@ -37,7 +37,7 @@ pub use genre::{GenreDetails, Genres};
 pub use history::{History, HistoryState};
 pub use home::Home;
 pub use library::{
-    Addition, Library, LibraryEvent, LibraryPart, LibraryState, Problem, Ready, Shelf,
+    Addition, Ignore, Library, LibraryEvent, LibraryPart, LibraryState, Problem, Ready, Shelf,
 };
 pub use logging::log_file;
 pub use lyrics::{Lyrics, LyricsState};

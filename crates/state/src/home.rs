@@ -422,11 +422,17 @@ fn pruned(sections: &[GenreSection]) -> Vec<GenreSection> {
 }
 
 fn picks(library: &Entity<Library>, shelf: Shelf, seed: u64, cx: &App) -> Rc<Vec<Track>> {
-    let tracks = library.read(cx).state(shelf).tracks();
-    Rc::new(mixed_tracks(tracks, seed))
+    let library = library.read(cx);
+    let tracks: Vec<&Track> = library
+        .state(shelf)
+        .tracks()
+        .iter()
+        .filter(|track| !library.blocked(track))
+        .collect();
+    Rc::new(mixed_tracks(&tracks, seed))
 }
 
-fn mixed_tracks(tracks: &[Track], seed: u64) -> Vec<Track> {
+fn mixed_tracks(tracks: &[&Track], seed: u64) -> Vec<Track> {
     let mut random = fastrand::Rng::with_seed(seed);
     let mut selected = tracks
         .iter()
@@ -449,12 +455,12 @@ fn mixed_tracks(tracks: &[Track], seed: u64) -> Vec<Track> {
 
     let mut artists = selected
         .iter()
-        .map(|index| artist_key(&tracks[*index]))
+        .map(|index| artist_key(tracks[*index]))
         .collect::<HashSet<_>>();
     let mut fallback = Vec::new();
     let mut diverse_count = 0;
     for index in remaining {
-        if diverse_count < GROUP_SIZE && artists.insert(artist_key(&tracks[index])) {
+        if diverse_count < GROUP_SIZE && artists.insert(artist_key(tracks[index])) {
             selected.push(index);
             diverse_count += 1;
         } else {
@@ -465,7 +471,7 @@ fn mixed_tracks(tracks: &[Track], seed: u64) -> Vec<Track> {
     selected.extend(fallback.into_iter().take(LIMIT - selected.len()));
     let mut mixed = selected
         .into_iter()
-        .map(|index| tracks[index].clone())
+        .map(|index| (*tracks[index]).clone())
         .collect::<Vec<_>>();
     random.shuffle(&mut mixed);
     mixed
@@ -520,6 +526,7 @@ mod tests {
         let tracks = (0..60)
             .map(|index| track(index, index, true))
             .collect::<Vec<_>>();
+        let tracks: Vec<&Track> = tracks.iter().collect();
 
         let first = mixed_tracks(&tracks, 42);
         let second = mixed_tracks(&tracks, 42);
@@ -546,6 +553,7 @@ mod tests {
         let tracks = (0..50)
             .map(|index| track(index, index, index % 2 == 0))
             .collect::<Vec<_>>();
+        let tracks: Vec<&Track> = tracks.iter().collect();
 
         let selected = mixed_tracks(&tracks, 7);
 
@@ -558,6 +566,7 @@ mod tests {
         let tracks = (0..64)
             .map(|index| track(index, index.saturating_sub(23), true))
             .collect::<Vec<_>>();
+        let tracks: Vec<&Track> = tracks.iter().collect();
 
         let selected = mixed_tracks(&tracks, 99);
         let artists = selected

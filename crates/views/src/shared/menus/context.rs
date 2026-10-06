@@ -3,7 +3,7 @@ use gpui::{App, ClickEvent, ClipboardItem, Context, Entity, SharedString, Window
 use i18n::t;
 use music::{Album, GenreItem, MediaKind, Playlist, SavedArtist, Track};
 use router::{Destination, navigate};
-use state::{Addition, Detail, History, Library, Mix, Origin, Playback, Shelf, Sonora};
+use state::{Addition, Detail, History, Ignore, Library, Mix, Origin, Playback, Shelf, Sonora};
 use ui::{Menu, MenuItem, MenuSearch, Pin, PinKind, Scrollbar, SubmenuState};
 
 use crate::shared::confirm::Confirm;
@@ -497,6 +497,45 @@ impl ItemMenu {
                 .on_click(move |_, window, cx| TagEditor::open(track.clone(), window, cx))
         });
 
+        let ignore_ids: Vec<String> = tracks.iter().filter_map(|track| track.id.clone()).collect();
+        let ignored = !ignore_ids.is_empty()
+            && ignore_ids
+                .iter()
+                .all(|id| library.read(cx).ignored(Ignore::Track, id));
+        let ignore = match ignore_ids.is_empty() {
+            true => MenuItem::new(
+                "ignore",
+                counted("menu-ignore-song", "menu-ignore-songs", count),
+            )
+            .icon("icons/funnel.svg")
+            .disabled(),
+            false => {
+                let library = library.clone();
+                MenuItem::new(
+                    "ignore",
+                    match ignored {
+                        true => counted("menu-unignore-song", "menu-unignore-songs", count),
+                        false => counted("menu-ignore-song", "menu-ignore-songs", count),
+                    },
+                )
+                .icon(match ignored {
+                    true => "icons/undo-2.svg",
+                    false => "icons/funnel.svg",
+                })
+                .tooltip(match ignored {
+                    true => "menu-unignore-tip",
+                    false => "menu-ignore-tip",
+                })
+                .on_click(move |_, _, cx| {
+                    library.update(cx, |library, cx| {
+                        for id in &ignore_ids {
+                            library.set_ignored(Ignore::Track, id, !ignored, cx);
+                        }
+                    });
+                })
+            }
+        };
+
         let delete_files = imported.then(|| {
             let ids = ids.clone();
             MenuItem::new(
@@ -538,6 +577,7 @@ impl ItemMenu {
                 details
                     .into_iter()
                     .chain(edit)
+                    .chain([ignore])
                     .chain(copy)
                     .chain(delete_files)
                     .collect(),
@@ -806,8 +846,36 @@ pub(crate) fn album_menu(
                 .map(|pin| pin_action(&pin, cx))
                 .into_iter()
                 .collect(),
+            vec![ignore_album_item(&album, cx)],
         ],
     )
+}
+
+/// The ignore toggle of an album's menu: the item switches label and tooltip with the state.
+fn ignore_album_item(album: &Album, cx: &App) -> MenuItem {
+    let library = Sonora::global(cx).library.clone();
+    let ignored = library.read(cx).ignored(Ignore::Album, &album.id);
+    let id = album.id.clone();
+    MenuItem::new(
+        "ignore",
+        match ignored {
+            true => t!("menu-unignore-album"),
+            false => t!("menu-ignore-album"),
+        },
+    )
+    .icon(match ignored {
+        true => "icons/undo-2.svg",
+        false => "icons/funnel.svg",
+    })
+    .tooltip(match ignored {
+        true => "menu-unignore-tip",
+        false => "menu-ignore-tip",
+    })
+    .on_click(move |_, _, cx| {
+        library.update(cx, |library, cx| {
+            library.set_ignored(Ignore::Album, &id, !ignored, cx);
+        });
+    })
 }
 
 fn album_library_item(album: Album, cx: &App) -> MenuItem {
@@ -909,8 +977,36 @@ pub(crate) fn artist_menu(
                 .map(|pin| pin_action(&pin, cx))
                 .into_iter()
                 .collect(),
+            vec![ignore_artist_item(&artist, cx)],
         ],
     )
+}
+
+/// The ignore toggle of an artist's menu, matching the album one.
+fn ignore_artist_item(artist: &SavedArtist, cx: &App) -> MenuItem {
+    let library = Sonora::global(cx).library.clone();
+    let ignored = library.read(cx).ignored(Ignore::Artist, &artist.id);
+    let id = artist.id.clone();
+    MenuItem::new(
+        "ignore",
+        match ignored {
+            true => t!("menu-unignore-artist"),
+            false => t!("menu-ignore-artist"),
+        },
+    )
+    .icon(match ignored {
+        true => "icons/undo-2.svg",
+        false => "icons/funnel.svg",
+    })
+    .tooltip(match ignored {
+        true => "menu-unignore-tip",
+        false => "menu-ignore-tip",
+    })
+    .on_click(move |_, _, cx| {
+        library.update(cx, |library, cx| {
+            library.set_ignored(Ignore::Artist, &id, !ignored, cx);
+        });
+    })
 }
 
 fn artist_library_item(artist: SavedArtist, cx: &App) -> Option<MenuItem> {

@@ -19,6 +19,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   its own page.
 - Add or remove individual artists with the + button in the local metadata editor.
   Each artist name stays intact, including commas, ampersands and featuring text.
+- A song, album or artist can now be ignored from its context menu. Ignored items stay in
+  the library but leave mixes, quick picks and the forever queue, and the same menu item
+  lets them back in.
 
 ### Changed
 

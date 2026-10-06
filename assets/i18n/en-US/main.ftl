@@ -135,6 +135,16 @@ menu-remove-tracks-from-history = { $count ->
 }
 menu-delete-track-file = Delete track file
 menu-delete-track-files = Delete { $count } track files
+menu-ignore-song = Ignore song
+menu-ignore-songs = Ignore { $count } songs
+menu-unignore-song = Stop ignoring song
+menu-unignore-songs = Stop ignoring { $count } songs
+menu-ignore-album = Ignore album
+menu-unignore-album = Stop ignoring album
+menu-ignore-artist = Ignore artist
+menu-unignore-artist = Stop ignoring artist
+menu-ignore-tip = Keeps it out of mixes, picks and the forever queue
+menu-unignore-tip = Lets it back into mixes, picks and the forever queue
 menu-play-next = Play next
 menu-play-tracks-next = { $count ->
     [one] Play { $count } track next
