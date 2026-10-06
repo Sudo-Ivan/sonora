@@ -220,11 +220,7 @@ fn tail(source: &[Entry], current: Option<&Entry>) -> usize {
     source
         .iter()
         .position(|entry| Rc::ptr_eq(&entry.track, &current.track))
-        .or_else(|| {
-            source
-                .iter()
-                .position(|entry| entry.id() == current.id())
-        })
+        .or_else(|| source.iter().position(|entry| entry.id() == current.id()))
         .map_or(0, |index| index + 1)
 }
 
@@ -514,7 +510,9 @@ impl Queue {
 
     /// The tracks the user queued by hand. They open `upcoming`.
     pub fn manual(&self) -> impl ExactSizeIterator<Item = &Track> {
-        self.upcoming.range(..self.manual).map(|entry| &*entry.track)
+        self.upcoming
+            .range(..self.manual)
+            .map(|entry| &*entry.track)
     }
 
     pub fn similar(&self) -> impl ExactSizeIterator<Item = &Track> {

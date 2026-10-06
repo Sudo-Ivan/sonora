@@ -19,8 +19,8 @@ use i18n::t;
 use music::{Shape, Track};
 use router::{Destination, LibraryTab, navigate};
 use state::{
-    Addition, AppSettings, Genres, Library, LibraryPart, LibraryState, Mix, Origin, Playback,
-    Scan, Shelf, Sonora,
+    Addition, AppSettings, Genres, Library, LibraryPart, LibraryState, Mix, Origin, Playback, Scan,
+    Shelf, Sonora,
 };
 use ui::{
     ActiveTheme as _, Button, Card, Deck, FilterChange, LEADING, Listing, Mode, Pinnable, Popovers,
@@ -1368,7 +1368,7 @@ impl LibraryView {
         let toggled = self.playback.clone();
         let play_mix = mix.clone();
         let press_mix = mix.clone();
-        let press_state = state.clone();
+        let press_state = state;
 
         Card::new(
             ("library-mix", index),
