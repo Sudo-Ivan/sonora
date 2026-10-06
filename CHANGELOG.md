@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.12] - 2026-10-06
+
 ### Added
 
 - Czech joins the translations, and the French translation is complete.
