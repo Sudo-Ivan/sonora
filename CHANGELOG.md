@@ -9,6 +9,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Czech joins the translations, and the French translation is complete.
+- A new "Use OS fullscreen" setting makes the fullscreen view fill the whole screen.
+- The fullscreen view remembers which side tab was open across restarts.
+- Sonora can be picked as the default app for audio files on Windows.
+- A menu item's tooltip now appears at once and follows the cursor, and an unavailable
+  theme says why it cannot be picked.
+- Tags naming several artists give a local track or album every one of them, each with
+  its own page.
 - Add or remove individual artists with the + button in the local metadata editor.
   Each artist name stays intact, including commas, ampersands and featuring text.
 
@@ -17,6 +25,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Mixes page and the library-based Quick picks now deal once a day instead of dealing
   the same set on every rebuild: each mix's front track rotates day to day, and the page
   refreshes itself at midnight. A change to the shelf still redeals at once.
+- The track after the playing one downloads while the current one plays, so it starts
+  without a gap.
+- A track left paused for five minutes or more reloads where it stopped rather than
+  resuming from a stale decoder.
+- The "playing from" line now follows the collection each queued track came from, even in
+  a queue built from several albums.
+- Local files open at once, even while a library scan is still running.
+- Settings and theme files saved on Windows with a byte order mark load instead of being
+  reported as broken.
+- Memory use is lower across the board: covers decode at their drawn size, track downloads
+  spool to the page cache, lyrics live in the cache database, and the heap is trimmed only
+  while nobody is watching the window.
+
+### Fixed
+
+- In fullscreen the heart stays beside a long title, the visualizer stops short of the
+  title, the frosted controls stay blurred while the view fades in, and the settings
+  header keeps its haze on the way out.
+- Guests no longer see library startup options they cannot use.
+- The library says "Songs" instead of "Favorites" while the first scan runs.
+- A removed local artist's page now closes.
+- Play buttons read intent, so a held track no longer flashes as playing.
+- Window corners round consistently on Linux, and slider thumbs land where the groove is.
+- Pins and stale detail for a removed playlist clear.
 
 ## [0.42.11] - 2026-10-04
 
