@@ -1261,4 +1261,115 @@ mod tests {
         trim(&mut past, 0);
         assert!(past.is_empty());
     }
+
+    /// One measured value in the shape the bench gate reads off the test output.
+    fn bench(name: &str, value: f64) {
+        println!("BENCH {{\"name\":\"{name}\",\"value\":{value},\"unit\":\"us\"}}");
+    }
+
+    /// A seeded scale check rather than an assertion: builds a 12k-track source the way a
+    /// whole-library play leaves the queue, then times the operations every advance and
+    /// shuffle runs. Run it as cargo test -p state queue_scales -- --ignored --nocapture.
+    #[test]
+    #[ignore = "measures timings rather than asserting"]
+    fn queue_scales() {
+        use std::time::Instant;
+
+        let size = |track: &Track| {
+            std::mem::size_of::<Track>()
+                + track.id.as_deref().map_or(0, str::len)
+                + track.name.len()
+                + track.artists.len()
+                + track
+                    .artist_refs
+                    .iter()
+                    .map(|a| a.name.len() + a.id.as_deref().map_or(0, str::len))
+                    .sum::<usize>()
+                + track.album.len()
+                + track.album_id.as_deref().map_or(0, str::len)
+                + track.cover.as_deref().map_or(0, str::len)
+                + track.tags.iter().map(|t| t.len()).sum::<usize>()
+        };
+        let rss = || {
+            std::fs::read_to_string("/proc/self/status")
+                .ok()
+                .and_then(|status| {
+                    status
+                        .lines()
+                        .find(|line| line.starts_with("VmRSS"))
+                        .map(|line| line.to_owned())
+                })
+        };
+
+        let tracks: Vec<Entry> = (0..12_000)
+            .map(|index| {
+                let mut seeded = track(&format!("id-{index}"));
+                seeded.artists = format!("Artist {}", index % 700);
+                seeded.artist_refs = vec![ArtistRef {
+                    name: format!("Artist {}", index % 700),
+                    id: Some(format!("a{}", index % 700)),
+                }];
+                seeded.album = format!("Album {}", index % 1200);
+                seeded.album_id = Some(format!("al{}", index % 1200));
+                seeded.cover = Some(format!("https://covers.example/{index}.jpg"));
+                seeded.tags = vec!["rock".to_owned()];
+                Entry {
+                    track: Rc::new(seeded),
+                    origin: None,
+                }
+            })
+            .collect();
+        let per_track: usize =
+            tracks.iter().map(|entry| size(&entry.track)).sum::<usize>() / tracks.len();
+        println!("~{per_track} B per track, {} tracks", tracks.len());
+        println!("rss before: {}", rss().unwrap_or_default());
+
+        let mut past = Vec::new();
+        let mut current = None;
+        let mut upcoming: VecDeque<_> = tracks.iter().cloned().collect();
+        let source = tracks;
+        println!("rss with queue+source: {}", rss().unwrap_or_default());
+
+        let clock = Instant::now();
+        for _ in 0..2000 {
+            let next = upcoming.pop_front().expect("queue ran dry");
+            if let Some(played) = current.replace(next) {
+                past.push(played);
+            }
+        }
+        println!("2000 advances: {:?}", clock.elapsed());
+        bench("queue_advance_2000", clock.elapsed().as_micros() as f64);
+
+        let clock = Instant::now();
+        let record = record("deezer", &past, current.as_ref(), upcoming.iter(), 40);
+        let json = serde_json::to_string(&record).expect("resume serializes");
+        println!(
+            "record+serialize: {:?} ({} bytes)",
+            clock.elapsed(),
+            json.len()
+        );
+        bench("queue_record_serialize", clock.elapsed().as_micros() as f64);
+
+        let clock = Instant::now();
+        let mut shuffled: VecDeque<_> = upcoming.iter().cloned().collect();
+        scramble(&mut shuffled, &source, current.as_ref());
+        println!("scramble of {}: {:?}", shuffled.len(), clock.elapsed());
+        bench("queue_scramble_12000", clock.elapsed().as_micros() as f64);
+
+        let clock = Instant::now();
+        let ids: std::collections::HashSet<String> = past
+            .iter()
+            .chain(current.as_ref())
+            .chain(upcoming.iter())
+            .filter_map(|entry| entry.id().map(str::to_owned))
+            .collect();
+        println!("ids() over {}: {:?}", ids.len(), clock.elapsed());
+        bench("queue_ids_12000", clock.elapsed().as_micros() as f64);
+
+        let clock = Instant::now();
+        restore(&mut shuffled, &source, current.as_ref());
+        println!("restore: {:?}", clock.elapsed());
+        bench("queue_restore", clock.elapsed().as_micros() as f64);
+        println!("rss after: {}", rss().unwrap_or_default());
+    }
 }
