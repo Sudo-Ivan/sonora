@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The Mixes page and the library-based Quick picks now deal once a day instead of dealing
+  the same set on every rebuild: each mix's front track rotates day to day, and the page
+  refreshes itself at midnight. A change to the shelf still redeals at once.
+
 ## [0.42.11] - 2026-10-04
 
 ### Removed

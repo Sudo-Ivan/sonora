@@ -1,6 +1,8 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -415,6 +417,50 @@ fn stamp() -> i64 {
         .as_secs() as i64
 }
 
+/// A shelf's dealt mixes and the stamp they were scored from.
+type Dealt = Option<(u64, Rc<Vec<Mix>>)>;
+
+/// The fingerprint `Library::mixes` keys its cache to: the day, then everything the score
+/// reads from the shelf. A change anywhere below it deals a new set, while the plays that
+/// land through the day are left for tomorrow's deal rather than churning the page.
+fn mix_stamp(held: &Held, favorites: &[Track], day: u64) -> u64 {
+    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut fold = |bytes: &[u8]| {
+        for byte in bytes {
+            stamp ^= u64::from(*byte);
+            stamp = stamp.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    fold(&day.to_le_bytes());
+    for track in held.state.tracks() {
+        fold(track.id.as_deref().unwrap_or_default().as_bytes());
+        fold(&[u8::from(track.playable), u8::from(track.explicit)]);
+        fold(&track.duration.as_secs().to_le_bytes());
+        fold(&track.popularity.to_le_bytes());
+        fold(&track.playcount.unwrap_or_default().to_le_bytes());
+        fold(track.artists.as_bytes());
+        fold(track.album_id.as_deref().unwrap_or_default().as_bytes());
+        for artist in &track.artist_refs {
+            fold(artist.name.as_bytes());
+            fold(artist.id.as_deref().unwrap_or_default().as_bytes());
+        }
+        for tag in &track.tags {
+            fold(tag.as_bytes());
+        }
+        for credit in &track.credits {
+            fold(credit.name.as_bytes());
+        }
+    }
+    for album in held.state.albums() {
+        fold(album.id.as_bytes());
+        fold(&album.year.to_le_bytes());
+    }
+    for track in favorites {
+        fold(track.id.as_deref().unwrap_or_default().as_bytes());
+    }
+    stamp
+}
+
 fn take<T>(
     part: LibraryPart,
     result: anyhow::Result<Vec<T>>,
@@ -756,6 +802,11 @@ pub struct Library {
     mosaics: HashMap<String, Task<()>>,
     snapshots: Snapshots,
     priming: [Option<Task<()>>; 2],
+    /// Each shelf's mixes and the stamp they were scored from: the day plus the data the
+    /// score reads, so the page deals once a day or once a library change at most.
+    mixes: [RefCell<Dealt>; 2],
+    /// Wakes the shelf's observers at each day's turn, so the Mixes page deals again.
+    _daily: Option<Task<()>>,
 }
 
 impl Library {
@@ -814,6 +865,15 @@ impl Library {
         })
         .detach();
 
+        let daily = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(mix::day_left()).await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    return;
+                }
+            }
+        });
+
         let mut library = Self {
             shelves: [Held::empty(), Held::empty()],
             session,
@@ -832,6 +892,8 @@ impl Library {
             mosaics: HashMap::new(),
             snapshots: Snapshots::new(cache),
             priming: [None, None],
+            mixes: [RefCell::new(None), RefCell::new(None)],
+            _daily: Some(daily),
         };
         library.held_mut(Shelf::Streaming).state = LibraryState::Loading;
         library.prime(Shelf::Streaming, cx);
@@ -1204,9 +1266,19 @@ impl Library {
 
     /// The mixes the shelf's tracks make, best first, for the cards of the Mixes page.
     /// Artists cluster by the releases, tags and credits they share and rank by the
-    /// listener's taste; each mix's seed is what `Playback::play_mix` opens with.
-    pub fn mixes(&self, shelf: Shelf, cx: &App) -> Vec<Mix> {
+    /// listener's taste; each mix's seed is what `Playback::play_mix` opens with. The page
+    /// deals once a day and once per library change rather than on every read: the salt
+    /// turns over at midnight and the plays that land meanwhile wait for tomorrow's deal.
+    pub fn mixes(&self, shelf: Shelf, cx: &App) -> Rc<Vec<Mix>> {
+        let day = mix::day();
         let held = self.held(shelf);
+        let stamp = mix_stamp(held, self.favorite_tracks(shelf), day);
+        if let Some((saved, mixes)) = &*self.mixes[shelf.slot()].borrow()
+            && *saved == stamp
+        {
+            return mixes.clone();
+        }
+
         let favorites: HashSet<String> = self
             .favorite_tracks(shelf)
             .iter()
@@ -1228,8 +1300,11 @@ impl Library {
             &favorites,
             &years,
             recent.iter(),
+            day,
         );
-        mix::seeds(&index, mix::MIXES)
+        let mixes = Rc::new(mix::seeds(&index, mix::MIXES));
+        *self.mixes[shelf.slot()].borrow_mut() = Some((stamp, mixes.clone()));
+        mixes
     }
 
     fn favorites(&self, id: &str) -> Option<Favorites<'_>> {

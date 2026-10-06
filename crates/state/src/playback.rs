@@ -800,6 +800,7 @@ impl Playback {
             &favorites,
             &years,
             sonora.history.read(cx).tracks().iter(),
+            mix::day(),
         );
         let heard = self.queue.read(cx).ids();
         let tracks = mix::score(&index, mix, &heard);
@@ -1568,7 +1569,13 @@ impl Playback {
                     .take(mix::FOREVER_HISTORY)
                     .filter_map(|track| track.id.clone()),
             );
-            let index = mix::Index::new(pool, &favorites, &years, history.tracks().iter());
+            let index = mix::Index::new(
+                pool,
+                &favorites,
+                &years,
+                history.tracks().iter(),
+                mix::day(),
+            );
             mix::batch(&index, &heard, self.track.as_ref(), mix::FOREVER_BATCH)
         };
         if tracks.is_empty() {

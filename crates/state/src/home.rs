@@ -6,7 +6,9 @@ use std::time::Duration;
 use gpui::{App, Context, Entity, Task};
 use music::{GenreItem, GenreSection, HomeFeed, MusicApi, Track};
 
-use crate::{Io, Library, LibraryPart, LibraryState, Network, Session, SessionEvent, Shelf, join};
+use crate::{
+    Io, Library, LibraryPart, LibraryState, Network, Session, SessionEvent, Shelf, join, mix,
+};
 
 const GROUP_SIZE: usize = 10;
 const LIMIT: usize = GROUP_SIZE * 3;
@@ -62,7 +64,9 @@ impl Home {
         io: Io,
         cx: &mut Context<Self>,
     ) -> Self {
-        let picks_seed = fastrand::u64(..);
+        // The day's number is the seed, so the shelf deals once a day rather than on every
+        // launch, like the Mixes page.
+        let picks_seed = mix::day();
 
         cx.subscribe(&session, |this, _, event, cx| match event {
             SessionEvent::SignedIn => this.reload(cx),

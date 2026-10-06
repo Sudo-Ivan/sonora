@@ -1,6 +1,29 @@
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use music::Track;
+
+/// Seconds in a day, for the shelf's daily salt.
+const DAY: u64 = 86_400;
+
+/// Which UTC day it is, so a mix built today and one built tomorrow share nothing they did
+/// not earn: the salt turns over with the day and the shelf's mixes regenerate with it.
+pub(crate) fn day() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / DAY
+}
+
+/// How long until `day()` answers differently, for the observer that wakes the shelf then.
+pub(crate) fn day_left() -> Duration {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Duration::from_secs(DAY - secs % DAY)
+}
 
 /// How many artist mixes the Mixes page lists at most.
 pub(crate) const MIXES: usize = 12;
@@ -74,6 +97,9 @@ const RECENT_PENALTY: f32 = 3.;
 const FRESH: f32 = 1.5;
 /// A stable per-track nudge, so mixes on the same shelf still read differently.
 const JITTER: f32 = 0.5;
+/// How far the salt may move a track's rank to front its artist's mix: enough to rotate the
+/// seed between close candidates day to day, never enough to outrank a favorite.
+const SEED_JITTER: f32 = 4.;
 /// What each track an artist or an album already placed costs their next one, so a mix
 /// spreads across the library instead of settling on whoever scored highest.
 const ARTIST_REPEAT: f32 = 6.;
@@ -182,16 +208,22 @@ pub(crate) struct Index<'a> {
     recency: HashMap<String, f32>,
     /// The highest taste score in the index, for normalising weights.
     top_taste: f32,
+    /// What the jitter is keyed to besides a track's id: the day, so a rebuilt shelf deals a
+    /// different mix rather than the same one again.
+    salt: u64,
 }
 
 impl<'a> Index<'a> {
     /// Folds `tracks` into per-artist entries. `favorites` and `years` come from the same
     /// shelf; `recent` is listening history newest first and only marks what it names.
+    /// `salt` keys the jitter, so two indexes over the same shelf still deal differently
+    /// when it differs.
     pub(crate) fn new(
         tracks: impl IntoIterator<Item = &'a Track>,
         favorites: &'a HashSet<String>,
         years: &'a HashMap<&'a str, i32>,
         recent: impl IntoIterator<Item = &'a Track>,
+        salt: u64,
     ) -> Self {
         let tracks: Vec<&'a Track> = tracks.into_iter().collect();
         let mut artists: HashMap<&'a str, Artist<'a>> = HashMap::new();
@@ -226,13 +258,14 @@ impl<'a> Index<'a> {
             }
             artist.duration_total += track.duration.as_secs_f64();
             // A favorite fronts its artist's mix before anything, and among them the most
-            // played and most popular does.
+            // played and most popular does, give or take the day's nudge.
             let rank = POPULARITY * track.popularity as f32 / 100.
                 + track.playcount.map_or(0., |count| (count as f32 + 1.).ln())
                 + match starred {
                     true => 100.,
                     false => 0.,
-                };
+                }
+                + SEED_JITTER * jitter(track.id.as_deref().unwrap_or_default(), salt);
             if rank > artist.best_rank {
                 artist.best = index;
                 artist.best_rank = rank;
@@ -310,6 +343,7 @@ impl<'a> Index<'a> {
             years,
             recency,
             top_taste,
+            salt,
         }
     }
 
@@ -343,7 +377,7 @@ impl<'a> Index<'a> {
 /// The mixes a shelf's tracks make, best first and `limit` at most. Artists rank by taste,
 /// and each in turn joins the cluster it is closest to or starts its own, the way a daily
 /// mix gathers the artists that sound alike. A mix's seed is its lead's best track:
-/// favorites first, then the most played.
+/// favorites first, then the most played, with the index's salt settling the close calls.
 pub(crate) fn seeds(index: &Index, limit: usize) -> Vec<Mix> {
     let mut ranked: Vec<(&str, &Artist)> = index
         .artists
@@ -674,7 +708,7 @@ fn points(index: &Index, profile: &Profile, seed: &Track, track: &Track) -> f32 
         None if !starred => points += FRESH,
         None => {}
     }
-    points + JITTER * jitter(id)
+    points + JITTER * jitter(id, index.salt)
 }
 
 /// The artist a track belongs to for counting: its first credited id, else its names line.
@@ -699,10 +733,11 @@ fn normalize(name: &str) -> String {
     name.trim().to_lowercase()
 }
 
-/// A stable per-id value in [0, 1), so a track's nudge never changes between rebuilds.
-fn jitter(id: &str) -> f32 {
+/// A stable per-id and per-salt value in [0, 1): a track keeps its nudge while the salt
+/// holds and draws a new one when it turns, so a rebuilt mix shuffles its close calls.
+fn jitter(id: &str, salt: u64) -> f32 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in id.bytes() {
+    for byte in id.bytes().chain(salt.to_le_bytes()) {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -750,14 +785,16 @@ mod tests {
         favorites: &'a HashSet<String>,
         years: &'a HashMap<&'a str, i32>,
     ) -> Index<'a> {
-        Index::new(tracks.iter(), favorites, years, std::iter::empty())
+        Index::new(tracks.iter(), favorites, years, std::iter::empty(), 0)
     }
 
     #[test]
     fn seeds_group_by_artist_and_prefer_favorites() {
+        let mut lead = track(1, "Big", "a-big");
+        lead.playcount = Some(1000);
         let tracks = vec![
             track(0, "Solo", "a-solo"),
-            track(1, "Big", "a-big"),
+            lead,
             track(2, "Big", "a-big"),
             track(3, "Solo", "a-solo"),
         ];

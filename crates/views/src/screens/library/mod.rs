@@ -498,7 +498,7 @@ impl LibraryView {
         let toolbar = Toolbar::searchable(&me, cx);
 
         let card_scrollbar = cx.new(|_| Scrollbar::new(ScrollHandle::new()).watching(id));
-        let mixes: Rc<Vec<Mix>> = library.read(cx).mixes(shelf, cx).into();
+        let mixes: Rc<Vec<Mix>> = library.read(cx).mixes(shelf, cx);
 
         let mut view = Self {
             shelf,
@@ -1084,7 +1084,7 @@ impl LibraryView {
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         self.cards_dirty = true;
-        self.mixes = self.library.read(cx).mixes(self.shelf, cx).into();
+        self.mixes = self.library.read(cx).mixes(self.shelf, cx);
         for table in self.tables() {
             table.rebuild(cx);
         }
