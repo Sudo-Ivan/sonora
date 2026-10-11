@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.13] - 2026-10-10
+
 ### Fixed
 
 - The sign-in page offers Local Files alongside the streaming providers, and a configured
