@@ -205,6 +205,8 @@ struct Account {
     stored: bool,
     active: bool,
     cancel: bool,
+    /// The local library's card: clicking it picks folders rather than signing in.
+    local: bool,
     error: Option<Failure>,
 }
 
@@ -3067,7 +3069,7 @@ impl SettingsView {
         let waiting = matches!(session.state(), SessionState::Authorizing(_));
         let loading = session.is_pending();
         let chosen = self.chosen.filter(|_| loading);
-        session
+        let mut accounts: Vec<Account> = session
             .providers()
             .map(|info| Account {
                 slug: info.slug,
@@ -3083,9 +3085,22 @@ impl SettingsView {
                     None => info.active && !signed_out,
                 },
                 cancel: waiting && info.pending,
+                local: false,
                 error: info.error,
             })
-            .collect()
+            .collect();
+        accounts.push(Account {
+            slug: session.local_slug(),
+            name: session.local_provider().name(),
+            options: Vec::new(),
+            web_sign_in: false,
+            stored: !session.local_paths().is_empty(),
+            active: false,
+            cancel: false,
+            local: true,
+            error: None,
+        });
+        accounts
     }
 
     /// The words the accounts row answers a search with.
@@ -3163,21 +3178,26 @@ impl SettingsView {
             stored,
             active,
             cancel,
+            local,
             error,
         } = account;
-        let status = Some(match (active, stored) {
-            (true, _) => t!("settings-provider-current"),
-            (false, true) => t!("settings-provider-connected"),
-            (false, false) => t!("settings-provider-none"),
+        let status = Some(match (local, active, stored) {
+            (true, _, true) => t!("settings-provider-connected"),
+            (true, _, false) => t!("settings-local-folder-empty"),
+            (false, true, _) => t!("settings-provider-current"),
+            (false, false, true) => t!("settings-provider-connected"),
+            (false, false, false) => t!("settings-provider-none"),
         });
-        let press: Option<Press> = match (cancel, stored, active) {
-            (true, ..) | (_, true, true) => None,
-            (false, true, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
+        let press: Option<Press> = match (local, cancel, stored, active) {
+            // The local card's click is the folder pick; there is no account behind it.
+            (true, ..) => Some(Box::new(|_, _, cx| crate::shared::local::choose_folder(cx))),
+            (_, true, ..) | (_, _, true, true) => None,
+            (_, false, true, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
                 this.chosen = Some(slug);
                 this.session
                     .update(cx, |session, cx| session.switch(slug, cx));
             }))),
-            (false, false, _) => Some(Box::new(cx.listener(move |this, _, _, cx| {
+            (_, false, false, _) => Some(Box::new(cx.listener(move |this, _, _, cx| {
                 this.chosen = None;
                 this.start_sign_in(slug, name, &options, web_sign_in, cx);
             }))),
@@ -3190,9 +3210,11 @@ impl SettingsView {
                 name: name.into(),
                 status,
                 selected: active,
-                trailing: self.trailing(slug, slug, stored, cancel, pending, cx),
+                // The local card only ever carries the arrow: its folders come off through
+                // their own rows below, not through a sign-out.
+                trailing: self.trailing(slug, slug, stored && !local, cancel, pending, cx),
                 error,
-                press: press.filter(|_| !pending),
+                press: press.filter(|_| !pending || local),
             },
             cx,
         )
