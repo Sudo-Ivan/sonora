@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.14] - 2026-10-11
+
+### Fixed
+
+- The local files option is always on the sign-in page, under the provider choices.
+
 ## [0.42.13] - 2026-10-10
 
 ### Fixed
