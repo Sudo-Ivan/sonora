@@ -321,6 +321,8 @@ login-server-submit = Connect
 login-server-insecure = Trust a self-signed or otherwise invalid certificate
 login-choose-title = Sign in to { $provider }
 login-choose-detail = Choose how to sign in to { $provider }.
+login-local = Use local files
+login-local-detail = Or play the music on this computer without an account.
 
 # album and playlist pages
 detail-playlist = Playlist
