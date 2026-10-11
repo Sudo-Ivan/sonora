@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.15] - 2026-10-11
+
+### Fixed
+
+- Local Files has a card among the accounts in Settings, and it opens the folder picker.
+
 ## [0.42.14] - 2026-10-11
 
 ### Fixed
