@@ -36,6 +36,11 @@ modules:
       env:
         CARGO_HOME: /run/build/sonora/cargo
         CARGO_NET_OFFLINE: 'true'
+        # aws-lc-sys builds jitterentropy at -O0, but cc 1.6 snapshots the environment
+        # before the crate can filter the SDK's -O2 CFLAGS, so they still reach that
+        # file and its #error fails the build. Skip jitterentropy: aws-lc still seeds
+        # from the OS random source.
+        AWS_LC_SYS_NO_JITTER_ENTROPY: '1'
     sources:
       # Use source from GitHub:
       #- type: git
