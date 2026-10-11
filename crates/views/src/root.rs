@@ -757,12 +757,17 @@ impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // An account that could not be reached is still an account, so nothing about a lost
         // network puts the sign-in page up: the workspace stays, on what the library kept and
-        // on the local files.
-        let show_sign_in = match self.session.read(cx).state() {
-            SessionState::SignedOut | SessionState::Failed(_) => true,
-            SessionState::Restoring | SessionState::SignedIn(_) | SessionState::Offline(_) => false,
-            SessionState::Authorizing(_) => self.signing_in,
-        };
+        // on the local files. It stays down once local folders are set too, since they are a
+        // library of their own.
+        let session = self.session.read(cx);
+        let show_sign_in = session.local_paths().is_empty()
+            && match session.state() {
+                SessionState::SignedOut | SessionState::Failed(_) => true,
+                SessionState::Restoring | SessionState::SignedIn(_) | SessionState::Offline(_) => {
+                    false
+                }
+                SessionState::Authorizing(_) => self.signing_in,
+            };
         self.signing_in = show_sign_in;
 
         match self.pending.take() {

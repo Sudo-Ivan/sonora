@@ -1,3 +1,4 @@
+use crate::shared::local;
 use crate::shared::popups::CookiePrompt;
 use gpui::prelude::*;
 use gpui::{
@@ -6,7 +7,7 @@ use gpui::{
 };
 use i18n::t;
 use music::{SignIn, SignInPrompt};
-use state::{Session, SessionState, Sonora};
+use state::{Scan, Session, SessionState, Sonora};
 use ui::ActiveTheme as _;
 use ui::{
     Button, Checkbox, FORM_CONTEXT, Input, Modal, SelectNext, SelectPrevious, Submit, TabBar, Text,
@@ -52,6 +53,8 @@ pub struct LoginView {
 impl LoginView {
     pub fn new(session: Entity<Session>, cx: &mut Context<Self>) -> Self {
         cx.observe(&session, |_, _, cx| cx.notify()).detach();
+        cx.observe(&Scan::global(cx), |_, _, cx| cx.notify())
+            .detach();
         Self {
             session,
             secret: cx.new(|cx| Input::new("login-cookie-named-hint", cx)),
@@ -300,6 +303,85 @@ impl LoginView {
             )
     }
 
+    /// The local tab's column, the same shape a provider's takes. Its one action is the
+    /// folder pick rather than a sign-in, and whatever folders are set list under it since
+    /// the page hides again as soon as the scan behind them lands.
+    fn local_column(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = *cx.theme();
+        let session = self.session.read(cx);
+        let paths = session.local_paths();
+        let scanning = session.scanning();
+        let slug = session.local_slug();
+        let name = session.local_provider().name();
+        let progress = Scan::global(cx).read(cx).progress();
+        let caption = progress.map(|progress| match progress {
+            progress if progress.found == 0 => t!("library-scanning"),
+            progress if progress.walking => {
+                t!("library-scanning-found", found = progress.found)
+            }
+            progress => t!(
+                "library-scanning-progress",
+                read = progress.read,
+                found = progress.found
+            ),
+        });
+
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .w(COLUMN)
+            .child(
+                svg()
+                    .path(icons::path(crate::shared::provider_logo(slug)))
+                    .size(LOGO)
+                    .flex_none()
+                    .text_color(theme.foreground),
+            )
+            .child(
+                div()
+                    .text_size(theme.text(Text::Large))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(SharedString::from(name.to_string())),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .w_full()
+                    .child(
+                        local::choose_button(format!("sign-in-{slug}-folder"))
+                            .label(match paths.is_empty() {
+                                true => t!("settings-choose-folder"),
+                                false => t!("settings-add-folder"),
+                            })
+                            .outline()
+                            .w_full()
+                            .disabled(scanning),
+                    )
+                    .when_some(caption, |this, caption| {
+                        this.child(
+                            div()
+                                .text_size(theme.text(Text::Small))
+                                .text_color(theme.muted_foreground)
+                                .child(caption),
+                        )
+                    })
+                    .children(paths.into_iter().map(|path| {
+                        div()
+                            .w_full()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(theme.text(Text::Small))
+                            .text_color(theme.muted_foreground)
+                            .child(SharedString::from(path))
+                    })),
+            )
+    }
+
     fn code_prompt(&self, code: String, url: String, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         div()
@@ -417,7 +499,8 @@ impl Render for LoginView {
             SessionState::Authorizing(_) => manual_secret.is_none(),
             _ => false,
         };
-        let tabs = providers
+        let local_tab = providers.len();
+        let mut tabs = providers
             .iter()
             .enumerate()
             .map(|(index, info)| {
@@ -432,6 +515,22 @@ impl Render for LoginView {
                     }))
             })
             .collect::<Vec<_>>();
+        tabs.push(
+            Button::new(SharedString::from(format!(
+                "login-tab-{}",
+                self.session.read(cx).local_slug()
+            )))
+            .label(SharedString::from(
+                self.session.read(cx).local_provider().name(),
+            ))
+            .small()
+            .ghost()
+            .selected(self.tab == local_tab)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.tab = local_tab;
+                cx.notify();
+            })),
+        );
         let column = providers.into_iter().nth(self.tab).map(|info| Column {
             slug: info.slug,
             name: info.name,
@@ -513,6 +612,9 @@ impl Render for LoginView {
             .when_some(url, |this, url| this.child(self.url_prompt(url)))
             .child(TabBar::new("login-providers").flex_none().items(tabs))
             .when_some(column, |this, column| this.child(self.column(column, cx)))
+            .when(self.tab == local_tab, |this| {
+                this.child(self.local_column(cx))
+            })
             .when_some(manual_secret, |this, provider| {
                 this.child(self.secret_prompt(provider, cx).into_any_element())
             })

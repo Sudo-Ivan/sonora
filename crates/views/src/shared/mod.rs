@@ -33,6 +33,7 @@ pub(crate) fn provider_logo(slug: &str) -> &'static str {
     match slug {
         "subsonic" => "icons/subsonic.svg",
         "deezer" => "icons/deezer.svg",
+        "local" => "icons/file-music.svg",
         _ => "icons/music.svg",
     }
 }

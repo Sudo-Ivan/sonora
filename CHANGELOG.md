@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The sign-in page offers Local Files alongside the streaming providers, and a configured
+  local library opens the app without an account.
+
 ## [0.42.12] - 2026-10-06
 
 ### Added
