@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.42.16] - 2026-10-12
+
 ### Added
 
 - Deezer now fills Home with the account's own sections: Flow as Quick picks, the
