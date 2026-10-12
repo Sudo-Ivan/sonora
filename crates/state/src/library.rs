@@ -1421,7 +1421,14 @@ impl Library {
             recent.iter(),
             day,
         );
-        let mixes = Rc::new(mix::seeds(&index, mix::MIXES));
+        // The themed mixes lead the page, then the artist clusters, then a card of its own
+        // for the artists no other mix is named for.
+        let mut dealt = mix::themed(&index);
+        let clusters = mix::seeds(&index, mix::MIXES);
+        let solos = mix::solos(&index, &clusters, mix::SOLOS);
+        dealt.extend(clusters);
+        dealt.extend(solos);
+        let mixes = Rc::new(dealt);
         *self.mixes[shelf.slot()].borrow_mut() = Some((stamp, mixes.clone()));
         mixes
     }

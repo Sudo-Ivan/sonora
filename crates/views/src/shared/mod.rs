@@ -37,3 +37,34 @@ pub(crate) fn provider_logo(slug: &str) -> &'static str {
         _ => "icons/music.svg",
     }
 }
+
+/// A small pill naming the provider an item belongs to, drawn where the shelf it sits on
+/// is not obvious: a hit in a merged search, the track in the player bar.
+pub(crate) fn provider_chip(slug: &str, name: &str, cx: &gpui::App) -> gpui::AnyElement {
+    use gpui::prelude::*;
+    use ui::ActiveTheme as _;
+
+    let theme = *cx.theme();
+    gpui::div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_1()
+        .py_0p5()
+        .rounded_xs()
+        .bg(theme.muted)
+        .child(
+            gpui::svg()
+                .path(icons::path(provider_logo(slug)))
+                .size_3()
+                .text_color(theme.muted_foreground),
+        )
+        .child(
+            gpui::div()
+                .text_size(theme.text(ui::Text::Tiny))
+                .text_color(theme.muted_foreground)
+                .child(gpui::SharedString::from(name.to_owned())),
+        )
+        .into_any_element()
+}

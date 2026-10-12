@@ -1372,7 +1372,10 @@ impl LibraryView {
 
         Card::new(
             ("library-mix", index),
-            t!("library-artist-mix", artist = mix.name.clone()),
+            match mix.title {
+                Some(title) => i18n::translate(title),
+                None => t!("library-artist-mix", artist = mix.name.clone()),
+            },
         )
         .tile(card)
         .cover(seed.cover.clone())

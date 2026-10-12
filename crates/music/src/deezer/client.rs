@@ -17,9 +17,9 @@ use tokio::time::Instant;
 use crate::deezer::{decrypt, wire};
 use crate::engine::Loudness;
 use crate::{
-    Album, AlbumCatalogue, AlbumDetail, Artist, ArtistProfile, HomeFeed, MediaKind, MusicApi,
-    Playlist, PlaylistDetail, SUGGESTIONS, SavedArtist, Track, UserProfile, distinct_covers,
-    escape,
+    Album, AlbumCatalogue, AlbumDetail, Artist, ArtistCatalogue, ArtistProfile, Genre, GenreDetail,
+    GenreItem, GenreSection, HomeFeed, MediaKind, MusicApi, Playlist, PlaylistDetail, SUGGESTIONS,
+    SavedArtist, Track, UserDetail, UserProfile, distinct_covers, escape,
 };
 
 const GATEWAY: &str = "https://www.deezer.com/ajax/gw-light.php";
@@ -40,6 +40,32 @@ const PORTRAIT_LIMIT: usize = 24;
 /// lends.
 const SIMILAR_ARTISTS: usize = 6;
 const SIMILAR_RELEASES: usize = 2;
+
+/// How many releases one `album.getDiscography` page holds, and the most pages fetched:
+/// the api answers in small pages and an exhaustive discography is a few hundred albums.
+const DISCOGRAPHY_PAGE: u32 = 100;
+const DISCOGRAPHY_MAX: u32 = 300;
+
+/// The id prefixes `page.get` items and curated radios get, so `playlist` can tell a real
+/// playlist id from the endless mixes and the account's Flow.
+const RADIO_PREFIX: &str = "radio:";
+const SMART_PREFIX: &str = "smarttracklist:";
+const FLOW_ID: &str = "flow";
+const CHANNEL_PREFIX: &str = "channel:";
+
+/// The smart tracklists Deezer deals for an account: the weekly discoveries, the monthly
+/// top and the mixes inspired by the artists the listener keeps coming back to. They are
+/// the service's own mixes, listed on home under one shelf.
+const SMART_TRACKLISTS: [&str; 8] = [
+    "discovery",
+    "new-releases",
+    "monthly-top",
+    "inspired-by-1",
+    "inspired-by-2",
+    "inspired-by-3",
+    "inspired-by-4",
+    "inspired-by-5",
+];
 
 /// The public api allows fifty calls per five seconds from one address, so calls leave one
 /// at a time this far apart. A call above the limit waits for its slot instead of being
@@ -330,6 +356,56 @@ impl DeezerClient {
         Ok(answer)
     }
 
+    /// A `page.get` call for one of the layout pages the web app is built from: `home` for
+    /// the listener's own feed, `channels/<slug>` for a curated hub. The page spec rides in
+    /// the `gateway_input` url parameter as JSON, which is the one call that takes its
+    /// arguments that way rather than in the posted body.
+    async fn page(&self, page: &str) -> Result<Value> {
+        let token = self.inner.session.read().await.api_token.clone();
+        let input = json!({
+            "PAGE": page,
+            "VERSION": "2.3",
+            "SUPPORT": {
+                "grid": ["channel", "album", "playlist", "artist", "smarttracklist"],
+                "horizontal-grid": ["album", "playlist", "channel", "track", "smarttracklist"],
+                "slider": ["album", "channel"],
+            },
+            "LANG": "en",
+        });
+        let url = format!(
+            "{GATEWAY}?method=page.get&input=3&api_version=1.0&api_token={}&gateway_input={}",
+            escape::component(&token),
+            escape::component(&input.to_string())
+        );
+        let sid = self.inner.session.read().await.sid.clone();
+        let text = self
+            .inner
+            .http
+            .post(url)
+            .header("Cookie", format!("arl={}; sid={sid}", self.inner.arl))
+            .header("Content-Type", "text/plain;charset=UTF-8")
+            .body("{}")
+            .send()
+            .await
+            .with_context(|| format!("cannot reach the deezer gateway for page {page}"))?
+            .text()
+            .await
+            .context("cannot read the deezer gateway answer")?;
+        let answer: Value = serde_json::from_str(&text)
+            .with_context(|| format!("the deezer gateway answered page {page} with no json"))?;
+        if let Some(error) = answer.get("error") {
+            let trouble = match error {
+                Value::Object(map) if !map.is_empty() => Some(error.to_string()),
+                Value::Array(list) if !list.is_empty() => Some(error.to_string()),
+                _ => None,
+            };
+            if let Some(trouble) = trouble {
+                bail!("deezer page.get {page} refused the call: {trouble}");
+            }
+        }
+        Ok(answer.get("results").cloned().unwrap_or(Value::Null))
+    }
+
     /// One `deezer.pageProfile` tab: the user's favorite albums, artists or playlists,
     /// including the private ones the public api hides.
     async fn profile_tab(&self, tab: &str) -> Result<Vec<Value>> {
@@ -408,6 +484,352 @@ impl DeezerClient {
             })
             .take(SUGGESTIONS)
             .collect())
+    }
+
+    /// One `deezer.pageArtist` call: the artist's own overview as the web app draws it, with
+    /// biography, fan count, top tracks and the first discography page. Unlike the public
+    /// api's albums list, the sections here hold only what belongs to the artist itself.
+    async fn artist_page(&self, artist_id: &str) -> Result<Value> {
+        self.gw(
+            "deezer.pageArtist",
+            json!({
+                "art_id": artist_id,
+                "lang": "en",
+                "header": true,
+                "tab": 0,
+            }),
+        )
+        .await
+        .with_context(|| format!("cannot load the deezer artist {artist_id}"))
+    }
+
+    /// The whole of an artist's own discography, paged through `album.getDiscography` since
+    /// `deezer.pageArtist` lists only the first stretch. An album that keeps showing up
+    /// under another page's artist credit never lands here, which is what keeps a page free
+    /// of other artists' releases.
+    async fn discography(&self, artist_id: &str) -> Result<Vec<Album>> {
+        let mut albums = Vec::new();
+        let mut start = 0;
+        loop {
+            let page = self
+                .gw(
+                    "album.getDiscography",
+                    json!({
+                        "art_id": artist_id,
+                        "discography_mode": "all",
+                        "nb": DISCOGRAPHY_PAGE,
+                        "nb_songs": 0,
+                        "start": start,
+                    }),
+                )
+                .await
+                .with_context(|| format!("cannot load the discography of {artist_id}"))?;
+            let batch: Vec<Album> = page
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(wire::album)
+                .collect();
+            let fetched = batch.len() as u32;
+            albums.extend(batch);
+            let total = wire::number(&page, &["total"]).unwrap_or(albums.len() as u64) as u32;
+            start += DISCOGRAPHY_PAGE;
+            if fetched < DISCOGRAPHY_PAGE || start >= total || start >= DISCOGRAPHY_MAX {
+                break;
+            }
+        }
+        Ok(albums)
+    }
+
+    /// The account's Flow: Deezer's endless personal mix, as a track listing.
+    async fn flow_tracks(&self) -> Result<Vec<Track>> {
+        let user_id = self.user_id().await;
+        let path = format!("/user/{}/flow?limit=40", escape::component(&user_id));
+        let page = self
+            .public(&path)
+            .await
+            .context("cannot load the deezer flow")?;
+        Ok(wire::track_list(&page))
+    }
+
+    /// Flow as a playlist page, for the `flow` synthetic id.
+    async fn flow_playlist(&self) -> Result<PlaylistDetail> {
+        let tracks = self.flow_tracks().await?;
+        Ok(PlaylistDetail {
+            playlist: Playlist {
+                id: FLOW_ID.to_owned(),
+                name: "Flow".to_owned(),
+                owner: "Deezer".to_owned(),
+                owner_id: String::new(),
+                owned: false,
+                collaborative: false,
+                blend: false,
+                public: true,
+                cover: tracks.iter().find_map(|track| track.cover.clone()),
+                track_count: tracks.len() as u32,
+                modified_at: None,
+            },
+            tracks,
+            continuation: None,
+        })
+    }
+
+    /// A genre radio as a playlist page, for `radio:` synthetic ids. The radio is endless,
+    /// so the page holds one stretch of it.
+    async fn radio_playlist(&self, radio_id: &str) -> Result<PlaylistDetail> {
+        let radio_id = escape::component(radio_id);
+        let detail_path = format!("/radio/{radio_id}");
+        let tracks_path = format!("/radio/{radio_id}/tracks?limit=100");
+        let (detail, tracks) = tokio::join!(self.public(&detail_path), self.public(&tracks_path));
+        let mut playlist = wire::radio(&detail.context("cannot load the deezer radio")?)
+            .with_context(|| format!("cannot read the deezer radio {radio_id}"))?;
+        let tracks = tracks
+            .map(|page| wire::track_list(&page))
+            .context("cannot load the deezer radio tracks")?;
+        playlist.track_count = tracks.len() as u32;
+        Ok(PlaylistDetail {
+            playlist,
+            tracks,
+            continuation: None,
+        })
+    }
+
+    /// One smart tracklist as a playlist page, for `smarttracklist:` synthetic ids:
+    /// `deezer.pageSmartTracklist` answers the mix's own title, blurb and cover along its
+    /// tracks.
+    async fn smart_playlist(&self, tracklist_id: &str) -> Result<PlaylistDetail> {
+        let results = self
+            .gw(
+                "deezer.pageSmartTracklist",
+                json!({
+                    "SMARTTRACKLIST_ID": tracklist_id,
+                    "nb": 100,
+                    "start": 0,
+                    "lang": "en",
+                }),
+            )
+            .await
+            .with_context(|| format!("cannot load the deezer mix {tracklist_id}"))?;
+        let tracks = results
+            .get("SONGS")
+            .map(wire::track_list)
+            .unwrap_or_default();
+        let data = &results["DATA"];
+        let title = wire::text(data, &["AUTO_GENERATED_TITLE"])
+            .filter(|title| !title.is_empty())
+            .or_else(|| wire::text(data, &["TITLE"]))
+            .unwrap_or("Mix")
+            .to_owned();
+        let cover = wire::image(
+            "cover",
+            wire::text(&data["COVER"], &["MD5"]).or_else(|| {
+                data["PICTURES"]
+                    .as_array()
+                    .and_then(|list| list.first())
+                    .and_then(|first| wire::text(first, &["MD5"]))
+            }),
+            500,
+        )
+        .or_else(|| tracks.iter().find_map(|track| track.cover.clone()));
+        let track_count = results
+            .get("SONGS")
+            .and_then(|songs| wire::number(songs, &["total"]))
+            .unwrap_or(tracks.len() as u64) as u32;
+        Ok(PlaylistDetail {
+            playlist: Playlist {
+                id: format!("{SMART_PREFIX}{tracklist_id}"),
+                name: title,
+                owner: "Deezer".to_owned(),
+                owner_id: String::new(),
+                owned: false,
+                collaborative: false,
+                blend: false,
+                public: true,
+                cover,
+                track_count,
+                modified_at: None,
+            },
+            tracks,
+            continuation: None,
+        })
+    }
+
+    /// A card for every smart tracklist the account has, named the way Deezer names them.
+    /// A tracklist the gateway does not know, or one that names nothing back, is left out.
+    async fn mix_cards(&self) -> Vec<GenreItem> {
+        let mut items = Vec::new();
+        for tracklist_id in SMART_TRACKLISTS {
+            let results = self
+                .gw(
+                    "deezer.pageSmartTracklist",
+                    json!({
+                        "SMARTTRACKLIST_ID": tracklist_id,
+                        "nb": 1,
+                        "start": 0,
+                        "lang": "en",
+                    }),
+                )
+                .await;
+            let data = match results {
+                Ok(results) => results["DATA"].clone(),
+                Err(error) => {
+                    log::debug!("deezer: no {tracklist_id} mix card: {error:#}");
+                    continue;
+                }
+            };
+            let title = wire::text(&data, &["AUTO_GENERATED_TITLE"])
+                .filter(|title| !title.is_empty())
+                .or_else(|| wire::text(&data, &["TITLE"]))
+                .unwrap_or("Mix")
+                .to_owned();
+            let cover = wire::image(
+                "cover",
+                wire::text(&data["COVER"], &["MD5"]).or_else(|| {
+                    data["PICTURES"]
+                        .as_array()
+                        .and_then(|list| list.first())
+                        .and_then(|first| wire::text(first, &["MD5"]))
+                }),
+                300,
+            );
+            items.push(GenreItem::Playlist(Playlist {
+                id: format!("{SMART_PREFIX}{tracklist_id}"),
+                name: title,
+                owner: "Deezer".to_owned(),
+                owner_id: String::new(),
+                owned: false,
+                collaborative: false,
+                blend: false,
+                public: true,
+                cover,
+                track_count: 0,
+                modified_at: None,
+            }));
+        }
+        items
+    }
+
+    /// The artist overview through the public api, for the odd id `deezer.pageArtist` will
+    /// not answer. The albums listing it uses mixes in releases the artist only guests on,
+    /// so it is strictly the fallback.
+    async fn artist_public(&self, artist_id: &str) -> Result<Artist> {
+        let artist = escape::component(artist_id);
+        let detail_path = format!("/artist/{artist}");
+        let top_path = format!("/artist/{artist}/top?limit=20");
+        let albums_path = format!("/artist/{artist}/albums?limit=50");
+        let (detail, top, albums) = tokio::join!(
+            self.public(&detail_path),
+            self.public(&top_path),
+            self.public(&albums_path),
+        );
+        let detail = detail.context("cannot load the artist")?;
+        Ok(Artist {
+            name: wire::text(&detail, &["name"])
+                .unwrap_or_default()
+                .to_owned(),
+            cover_large: detail
+                .get("picture_xl")
+                .or_else(|| detail.get("picture_big"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            biography: None,
+            monthly_listeners: wire::number(&detail, &["nb_fan"]),
+            top_tracks: top.map(|page| wire::track_list(&page)).unwrap_or_default(),
+            albums: albums
+                .map(|page| {
+                    page.get("data")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default()
+                        .iter()
+                        .filter_map(wire::album)
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+
+    /// A home built from the public api when `page.get` brings nothing back: the service's
+    /// charts plus its genre radios as the mixes shelf.
+    async fn chart_sections(&self) -> Result<Vec<GenreSection>> {
+        let (albums, artists, playlists, radios) = tokio::join!(
+            self.public("/chart/0/albums?limit=15"),
+            self.public("/chart/0/artists?limit=15"),
+            self.public("/chart/0/playlists?limit=15"),
+            self.public("/radio/genres"),
+        );
+        let mut sections = Vec::new();
+        if let Ok(page) = albums {
+            let items: Vec<GenreItem> = page
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(wire::album)
+                .map(GenreItem::Album)
+                .collect();
+            if !items.is_empty() {
+                sections.push(GenreSection {
+                    title: "home-top-albums".to_owned(),
+                    items,
+                });
+            }
+        }
+        if let Ok(page) = artists {
+            let items: Vec<GenreItem> = page
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(wire::saved_artist)
+                .map(GenreItem::Artist)
+                .collect();
+            if !items.is_empty() {
+                sections.push(GenreSection {
+                    title: "home-top-artists".to_owned(),
+                    items,
+                });
+            }
+        }
+        if let Ok(page) = playlists {
+            let items: Vec<GenreItem> = page
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|value| wire::playlist(value, ""))
+                .map(GenreItem::Playlist)
+                .collect();
+            if !items.is_empty() {
+                sections.push(GenreSection {
+                    title: "home-top-playlists".to_owned(),
+                    items,
+                });
+            }
+        }
+        if let Ok(page) = radios {
+            let items: Vec<GenreItem> = page
+                .get("data")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(wire::radio)
+                .map(GenreItem::Playlist)
+                .collect();
+            if !items.is_empty() {
+                sections.push(GenreSection {
+                    title: "nav-mixes".to_owned(),
+                    items,
+                });
+            }
+        }
+        Ok(sections)
     }
 
     /// The full gateway record of one track: metadata plus the `TRACK_TOKEN` playback needs.
@@ -512,16 +934,31 @@ impl DeezerClient {
 #[async_trait]
 impl MusicApi for DeezerClient {
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String> {
-        let kind = match kind {
-            MediaKind::Track => "track",
-            MediaKind::Album => "album",
-            MediaKind::Artist => "artist",
-            MediaKind::Playlist => "playlist",
-        };
-        Some(format!(
-            "https://www.deezer.com/{kind}/{}",
-            escape::component(id)
-        ))
+        match kind {
+            MediaKind::Playlist
+                if id == FLOW_ID
+                    || id.starts_with(SMART_PREFIX)
+                    || id.starts_with(RADIO_PREFIX) =>
+            {
+                None
+            }
+            MediaKind::Playlist => Some(format!(
+                "https://www.deezer.com/playlist/{}",
+                escape::component(id)
+            )),
+            MediaKind::Track => Some(format!(
+                "https://www.deezer.com/track/{}",
+                escape::component(id)
+            )),
+            MediaKind::Album => Some(format!(
+                "https://www.deezer.com/album/{}",
+                escape::component(id)
+            )),
+            MediaKind::Artist => Some(format!(
+                "https://www.deezer.com/artist/{}",
+                escape::component(id)
+            )),
+        }
     }
 
     async fn profile(&self) -> Result<UserProfile> {
@@ -533,58 +970,95 @@ impl MusicApi for DeezerClient {
         })
     }
 
+    async fn user(&self, user_id: &str) -> Result<UserDetail> {
+        let user_id = escape::component(user_id);
+        let detail_path = format!("/user/{user_id}");
+        let playlists_path = format!("/user/{user_id}/playlists?limit=50");
+        let (detail, playlists) =
+            tokio::join!(self.public(&detail_path), self.public(&playlists_path));
+        let mut user = wire::user(&detail.context("cannot load the deezer user")?)
+            .context("cannot read the deezer user")?;
+        user.playlists = playlists
+            .map(|page| {
+                page.get("data")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|value| wire::playlist(value, ""))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(user)
+    }
+
     async fn artist(&self, artist_id: &str) -> Result<Artist> {
-        let artist = escape::component(artist_id);
-        let detail_path = format!("/artist/{artist}");
-        let top_path = format!("/artist/{artist}/top?limit=20");
-        let albums_path = format!("/artist/{artist}/albums?limit=50");
-        let (detail, top, albums) = tokio::join!(
-            self.public(&detail_path),
-            self.public(&top_path),
-            self.public(&albums_path),
-        );
-        let detail = detail.context("cannot load the artist")?;
+        let page = match self.artist_page(artist_id).await {
+            Ok(page) => page,
+            Err(error) => {
+                log::debug!(
+                    "deezer: no page for artist {artist_id}, public api instead: {error:#}"
+                );
+                return self.artist_public(artist_id).await;
+            }
+        };
+        let data = &page["DATA"];
         Ok(Artist {
-            name: wire::text(&detail, &["name"])
+            name: wire::text(data, &["ART_NAME"])
                 .unwrap_or_default()
                 .to_owned(),
-            cover_large: detail
-                .get("picture_xl")
-                .or_else(|| detail.get("picture_big"))
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            biography: None,
-            monthly_listeners: wire::number(&detail, &["nb_fan"]),
-            top_tracks: top.map(|page| wire::track_list(&page)).unwrap_or_default(),
-            albums: albums
-                .map(|page| {
-                    page.get("data")
-                        .and_then(Value::as_array)
-                        .cloned()
-                        .unwrap_or_default()
-                        .iter()
-                        .filter_map(wire::album)
-                        .collect()
-                })
-                .unwrap_or_default(),
+            cover_large: wire::image("artist", wire::text(data, &["ART_PICTURE"]), 1000),
+            biography: wire::text(&page["BIO"], &["BIO"]).and_then(wire::biography),
+            monthly_listeners: wire::number(data, &["NB_FAN"]),
+            top_tracks: page.get("TOP").map(wire::track_list).unwrap_or_default(),
+            albums: page
+                .get("ALBUMS")
+                .and_then(|albums| albums.get("data"))
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(wire::album)
+                .collect(),
+        })
+    }
+
+    async fn artist_catalogue(&self, artist_id: &str, known: &[Track]) -> Result<ArtistCatalogue> {
+        let (albums, top) = tokio::join!(
+            self.discography(artist_id),
+            self.gw(
+                "artist.getTopTrack",
+                json!({ "ART_ID": artist_id, "nb": 100 }),
+            ),
+        );
+        let albums = albums?;
+        let top_tracks = top
+            .map(|page| {
+                page.get("data")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(wire::track)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|_| known.to_vec());
+        Ok(ArtistCatalogue {
+            albums,
+            top_tracks,
+            appears_on: Vec::new(),
         })
     }
 
     async fn artist_profile(&self, artist_id: &str) -> Result<ArtistProfile> {
-        let detail = self
-            .public(&format!("/artist/{}", escape::component(artist_id)))
-            .await
-            .context("cannot load the artist")?;
+        let page = self.artist_page(artist_id).await?;
+        let data = &page["DATA"];
         Ok(ArtistProfile {
-            name: wire::text(&detail, &["name"])
+            name: wire::text(data, &["ART_NAME"])
                 .unwrap_or_default()
                 .to_owned(),
-            cover_large: detail
-                .get("picture_xl")
-                .or_else(|| detail.get("picture_big"))
-                .and_then(Value::as_str)
-                .map(str::to_owned),
-            biography: None,
+            cover_large: wire::image("artist", wire::text(data, &["ART_PICTURE"]), 1000),
+            biography: wire::text(&page["BIO"], &["BIO"]).and_then(wire::biography),
         })
     }
 
@@ -695,16 +1169,37 @@ impl MusicApi for DeezerClient {
         Ok(())
     }
 
-    async fn remove_playlist_from_library(&self, _playlist_id: &str) -> Result<()> {
-        bail!("deezer cannot unfollow a playlist")
+    async fn remove_playlist_from_library(&self, playlist_id: &str) -> Result<()> {
+        self.gw(
+            "playlist.deleteFavorite",
+            json!({ "PLAYLIST_ID": playlist_id }),
+        )
+        .await
+        .context("cannot unfollow the playlist")?;
+        Ok(())
     }
 
-    async fn add_playlist_to_library(&self, _playlist_id: &str) -> Result<()> {
-        bail!("deezer cannot follow a playlist")
+    async fn add_playlist_to_library(&self, playlist_id: &str) -> Result<()> {
+        self.gw(
+            "playlist.addFavorite",
+            json!({ "PARENT_PLAYLIST_ID": playlist_id }),
+        )
+        .await
+        .context("cannot follow the playlist")?;
+        Ok(())
     }
 
-    async fn set_playlist_public(&self, _playlist_id: &str, _public: bool) -> Result<()> {
-        bail!("deezer cannot change a playlist's visibility")
+    async fn set_playlist_public(&self, playlist_id: &str, public: bool) -> Result<()> {
+        self.gw(
+            "playlist.update",
+            json!({ "playlist_id": playlist_id, "status": match public {
+                true => 1,
+                false => 0,
+            } }),
+        )
+        .await
+        .context("cannot change the playlist's visibility")?;
+        Ok(())
     }
 
     async fn add_track_to_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
@@ -845,6 +1340,15 @@ impl MusicApi for DeezerClient {
     }
 
     async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetail> {
+        if playlist_id == FLOW_ID {
+            return self.flow_playlist().await;
+        }
+        if let Some(radio_id) = playlist_id.strip_prefix(RADIO_PREFIX) {
+            return self.radio_playlist(radio_id).await;
+        }
+        if let Some(tracklist_id) = playlist_id.strip_prefix(SMART_PREFIX) {
+            return self.smart_playlist(tracklist_id).await;
+        }
         // the gateway, not the public api: only it can see the user's private playlists
         let results = self
             .gw(
@@ -955,8 +1459,144 @@ impl MusicApi for DeezerClient {
             .collect())
     }
 
+    /// The account's own recently played, newest first. Deezer lists them under the
+    /// profile's `history` tab, which only the account itself can read.
+    async fn recently_played(&self) -> Result<Vec<Track>> {
+        match self.profile_tab("history").await {
+            Ok(items) => Ok(items.iter().filter_map(wire::track).collect()),
+            Err(error) => {
+                log::debug!("deezer: no listening history: {error:#}");
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    /// The home feed the web app draws: `page.get` answers the listener's own sections
+    /// (made-for-you mixes, charts, new releases, genre rows), Flow stands in as Quick
+    /// picks, and the smart tracklists land as one Mixes shelf. When the layout call brings
+    /// nothing back, the public charts fill in instead.
     async fn home(&self) -> Result<HomeFeed> {
-        Ok(HomeFeed::default())
+        let (page, flow, mixes) =
+            tokio::join!(self.page("home"), self.flow_tracks(), self.mix_cards(),);
+        let mut sections = match page {
+            Ok(results) => {
+                let user_id = self.user_id().await;
+                wire::page_sections(&results, &user_id)
+            }
+            Err(error) => {
+                log::warn!("deezer: cannot load the home page: {error:#}");
+                Vec::new()
+            }
+        };
+        if sections.is_empty() {
+            sections = self.chart_sections().await.unwrap_or_else(|error| {
+                log::warn!("deezer: cannot load the charts: {error:#}");
+                Vec::new()
+            });
+        }
+        if !mixes.is_empty() {
+            sections.push(GenreSection {
+                title: "nav-mixes".to_owned(),
+                items: mixes,
+            });
+        }
+        Ok(HomeFeed {
+            listen_again: Vec::new(),
+            quick_picks: flow.ok().filter(|tracks| !tracks.is_empty()),
+            sections,
+        })
+    }
+
+    /// Deezer's whole genre list, as the search page's browse grid.
+    async fn genres(&self) -> Result<Vec<Genre>> {
+        let page = self
+            .public("/genre?limit=100")
+            .await
+            .context("cannot load the deezer genres")?;
+        Ok(page
+            .get("data")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(wire::genre)
+            .filter(|genre| genre.id != "0")
+            .collect())
+    }
+
+    /// One genre's page. A `channel:` id opens the curated channel of that slug; a numeric
+    /// id is a public-api genre, drawn from its chart, artists and radios.
+    async fn genre(&self, genre_id: &str) -> Result<GenreDetail> {
+        if let Some(slug) = genre_id.strip_prefix(CHANNEL_PREFIX) {
+            let results = self
+                .page(&format!("channels/{slug}"))
+                .await
+                .with_context(|| format!("cannot load the deezer channel {slug}"))?;
+            let user_id = self.user_id().await;
+            return Ok(GenreDetail {
+                name: wire::text(&results, &["title", "TITLE"])
+                    .unwrap_or_default()
+                    .to_owned(),
+                sections: wire::page_sections(&results, &user_id),
+            });
+        }
+
+        let genre_id = escape::component(genre_id);
+        let genre_path = format!("/genre/{genre_id}");
+        let albums_path = format!("/chart/{genre_id}/albums?limit=15");
+        let tracks_path = format!("/chart/{genre_id}/tracks?limit=15");
+        let artists_path = format!("/genre/{genre_id}/artists?limit=15");
+        let playlists_path = format!("/chart/{genre_id}/playlists?limit=15");
+        let radios_path = format!("/genre/{genre_id}/radios");
+        let (genre, albums, tracks, artists, playlists, radios) = tokio::join!(
+            self.public(&genre_path),
+            self.public(&albums_path),
+            self.public(&tracks_path),
+            self.public(&artists_path),
+            self.public(&playlists_path),
+            self.public(&radios_path),
+        );
+        let name = genre
+            .ok()
+            .and_then(|detail| wire::text(&detail, &["name"]).map(str::to_owned))
+            .unwrap_or_default();
+        let mut sections = Vec::new();
+        let mut shelf =
+            |title: &str, page: Result<Value>, item: fn(&Value) -> Option<GenreItem>| {
+                let items: Vec<GenreItem> = page
+                    .map(|page| {
+                        page.get("data")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(item)
+                    .collect();
+                if !items.is_empty() {
+                    sections.push(GenreSection {
+                        title: title.to_owned(),
+                        items,
+                    });
+                }
+            };
+        shelf("nav-albums", albums, |value| {
+            wire::album(value).map(GenreItem::Album)
+        });
+        shelf("nav-songs", tracks, |value| {
+            wire::track(value).map(GenreItem::Track)
+        });
+        shelf("nav-artists", artists, |value| {
+            wire::saved_artist(value).map(GenreItem::Artist)
+        });
+        shelf("home-playlists", playlists, |value| {
+            wire::playlist(value, "").map(GenreItem::Playlist)
+        });
+        shelf("nav-mixes", radios, |value| {
+            wire::radio(value).map(GenreItem::Playlist)
+        });
+        Ok(GenreDetail { name, sections })
     }
 }
 

@@ -45,10 +45,12 @@ impl PlayerBar {
     pub fn new(playback: Entity<Playback>, queue: Entity<Queue>, cx: &mut Context<Self>) -> Self {
         let library = Sonora::global(cx).library.clone();
         let settings = Sonora::global(cx).settings.clone();
+        let session = Sonora::global(cx).session.clone();
         cx.observe(&playback, |_, _, cx| cx.notify()).detach();
         cx.observe(&queue, |_, _, cx| cx.notify()).detach();
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
         cx.observe(&settings, |_, _, cx| cx.notify()).detach();
+        cx.observe(&session, |_, _, cx| cx.notify()).detach();
 
         let me = cx.entity_id();
         let playlist_scrollbar = cx.new(|_| Scrollbar::inset().watching(me));
@@ -246,6 +248,17 @@ impl PlayerBar {
         let cover = track.as_ref().and_then(|track| track.cover.clone());
         let explicit = track.as_ref().is_some_and(|track| track.explicit);
         let like = like(track.clone(), cx);
+        // The provider chip only makes sense with more than one source live; a single
+        // provider's name on every track is noise.
+        let source = {
+            let session = Sonora::global(cx).session.read(cx);
+            (session.active_slugs().len() > 1)
+                .then(|| {
+                    let id = track.as_ref()?.id.as_deref()?;
+                    Some((session.slug_for(id)?, session.name_for(id)?))
+                })
+                .flatten()
+        };
 
         div()
             .flex()
@@ -318,6 +331,11 @@ impl PlayerBar {
                                 })
                                 .when(explicit, |this| {
                                     this.child(div().flex_none().child(ExplicitBadge::new()))
+                                })
+                                .when_some(source, |this, (slug, name)| {
+                                    this.child(div().flex_none().child(
+                                        crate::shared::provider_chip(slug, name, cx),
+                                    ))
                                 })
                                 .child(like),
                         )

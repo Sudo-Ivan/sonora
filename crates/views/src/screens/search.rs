@@ -27,6 +27,7 @@ use ui::{
 use crate::shared::cards;
 use crate::shared::cells;
 use crate::shared::pins::Pinned as _;
+use crate::shared::provider_chip;
 use crate::shared::shelves;
 use crate::shared::trouble;
 
@@ -387,6 +388,40 @@ impl SearchView {
         }
     }
 
+    /// The provider a hit belongs to, as (slug, name) for `provider_chip`. `None` keeps the
+    /// row clean when only one source is live, which is most setups.
+    fn source(&self, hit: &Hit, cx: &App) -> Option<(&'static str, &'static str)> {
+        let session = Sonora::global(cx).session.read(cx);
+        if session.active_slugs().len() < 2 {
+            return None;
+        }
+        let id = match hit {
+            Hit::Song(track) => track.id.as_deref(),
+            Hit::Album(album) => Some(album.id.as_str()),
+            Hit::Playlist(list) => Some(list.id.as_str()),
+            Hit::Artist(artist) => artist.id.as_deref(),
+        };
+        match id {
+            Some(id) => session.slug_for(id).zip(session.name_for(id)),
+            None => session.provider_slug().zip(session.provider_name()),
+        }
+    }
+
+    /// `meta` with the hit's provider chip in front, when more than one source is live.
+    fn sourced(&self, hit: &Hit, meta: AnyElement, cx: &App) -> AnyElement {
+        let Some((slug, name)) = self.source(hit, cx) else {
+            return meta;
+        };
+        div()
+            .flex()
+            .min_w_0()
+            .items_center()
+            .gap_1()
+            .child(provider_chip(slug, name, cx))
+            .child(meta)
+            .into_any_element()
+    }
+
     fn row(
         &self,
         hit: &Hit,
@@ -397,7 +432,7 @@ impl SearchView {
         cx: &App,
     ) -> AnyElement {
         let theme = *cx.theme();
-        let meta = self.subtitle(hit, place, compact, &theme);
+        let meta = self.sourced(hit, self.subtitle(hit, place, compact, &theme), cx);
 
         let card = match hit {
             Hit::Song(track) => {
@@ -531,14 +566,19 @@ impl SearchView {
             .size(Text::Title)
             .weight(FontWeight::BOLD)
             .bare_meta(
-                cells::artist_links(
-                    "best-artist-link",
-                    artists,
-                    meta(hit, false),
-                    theme.muted_foreground,
-                )
-                .text_size(theme.text(Text::Small))
-                .truncate(),
+                self.sourced(
+                    hit,
+                    cells::artist_links(
+                        "best-artist-link",
+                        artists,
+                        meta(hit, false),
+                        theme.muted_foreground,
+                    )
+                    .text_size(theme.text(Text::Small))
+                    .truncate()
+                    .into_any_element(),
+                    cx,
+                ),
             )
             .flat()
             .gap_4()

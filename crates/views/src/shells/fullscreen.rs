@@ -112,6 +112,8 @@ impl FullscreenView {
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
         let settings = Sonora::global(cx).settings.clone();
         cx.observe(&settings, |_, _, cx| cx.notify()).detach();
+        let session = Sonora::global(cx).session.clone();
+        cx.observe(&session, |_, _, cx| cx.notify()).detach();
         let panel = settings.read(cx).fullscreen_tab();
         let shown = panel.unwrap_or(SideTab::Lyrics);
         let aside = cx.new(|cx| Aside::new(queue.clone(), playback.clone(), shown, cx));
@@ -436,6 +438,7 @@ impl FullscreenView {
         let album = track.as_ref().and_then(|track| track.album_id.clone());
         let explicit = track.as_ref().is_some_and(|track| track.explicit);
         let held = track.clone();
+        let source = source(&track, cx);
         let meta_bounds = self.meta_bounds.clone();
         let trailing = |track: Option<music::Track>, cx: &App| {
             div()
@@ -445,6 +448,13 @@ impl FullscreenView {
                 .gap_2()
                 .when(explicit, |this| {
                     this.child(div().flex_none().child(ExplicitBadge::new()))
+                })
+                .when_some(source, |this, (slug, name)| {
+                    this.child(
+                        div()
+                            .flex_none()
+                            .child(crate::shared::provider_chip(slug, name, cx)),
+                    )
                 })
                 .child(
                     div()
@@ -550,6 +560,7 @@ impl FullscreenView {
         let album = track.as_ref().and_then(|track| track.album_id.clone());
         let explicit = track.as_ref().is_some_and(|track| track.explicit);
         let held = track.clone();
+        let source = source(&track, cx);
 
         div()
             .flex()
@@ -607,6 +618,13 @@ impl FullscreenView {
                             )
                             .when(explicit, |this| {
                                 this.child(div().flex_none().child(ExplicitBadge::new()))
+                            })
+                            .when_some(source, |this, (slug, name)| {
+                                this.child(
+                                    div()
+                                        .flex_none()
+                                        .child(crate::shared::provider_chip(slug, name, cx)),
+                                )
                             })
                             .child(
                                 div()
@@ -1006,6 +1024,17 @@ impl FullscreenView {
 
 fn open_album(album: &str, cx: &mut App) {
     navigate(Destination::Album(album.into()), cx);
+}
+
+/// The provider the playing track belongs to, as (slug, name) for `provider_chip`. `None`
+/// keeps the chrome clean when only one source is live.
+fn source(track: &Option<music::Track>, cx: &App) -> Option<(&'static str, &'static str)> {
+    let session = Sonora::global(cx).session.read(cx);
+    if session.active_slugs().len() < 2 {
+        return None;
+    }
+    let id = track.as_ref()?.id.as_deref()?;
+    session.slug_for(id).zip(session.name_for(id))
 }
 
 impl Shell for FullscreenView {

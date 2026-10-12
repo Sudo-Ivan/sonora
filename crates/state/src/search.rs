@@ -300,7 +300,7 @@ impl Search {
                 Hit::Artist(artist) => artist.id.clone(),
                 Hit::Song(_) | Hit::Album(_) | Hit::Playlist(_) => None,
             })
-            .filter(|id| !self.portraits.contains_key(id))
+            .filter(|id| !music::is_local_id(id) && !self.portraits.contains_key(id))
             .collect();
 
         if wanted.is_empty() {
@@ -340,11 +340,19 @@ impl Search {
 
         self.hits = {
             let held = self.library.read(cx);
-            let state = held.state(Shelf::Streaming);
+            let streaming = held.state(Shelf::Streaming);
+            let local = held.state(Shelf::Local);
             rank(
-                state.tracks(),
-                state.albums(),
-                state.playlists(),
+                ShelfData {
+                    tracks: streaming.tracks(),
+                    albums: streaming.albums(),
+                    playlists: streaming.playlists(),
+                },
+                ShelfData {
+                    tracks: local.tracks(),
+                    albums: local.albums(),
+                    playlists: local.playlists(),
+                },
                 &self.catalog,
                 &self.portraits,
                 query,
@@ -355,10 +363,17 @@ impl Search {
     }
 }
 
+/// One shelf's library as search sees it. The streaming shelf comes first and wins the
+/// dedupe, so a track held on both answers with the catalog's entry hidden.
+struct ShelfData<'a> {
+    tracks: &'a [Track],
+    albums: &'a [Album],
+    playlists: &'a [Playlist],
+}
+
 fn rank(
-    library: &[Track],
-    albums: &[Album],
-    playlists: &[Playlist],
+    streaming: ShelfData<'_>,
+    local: ShelfData<'_>,
     catalog: &Catalog,
     portraits: &HashMap<String, String>,
     asked: &str,
@@ -368,20 +383,36 @@ fn rank(
         return Vec::new();
     }
 
-    let mut all = songs(library, &catalog.tracks, &query);
-    all.extend(artists(library, &catalog.tracks, albums, portraits, &query));
-    all.extend(albums_of(albums, library, catalog, &query));
-    all.extend(playlists_of(playlists, &catalog.playlists, &query));
+    let mut all = songs(&streaming, &local, &catalog.tracks, &query);
+    all.extend(artists(
+        &streaming,
+        &local,
+        &catalog.tracks,
+        portraits,
+        &query,
+    ));
+    all.extend(albums_of(&streaming, &local, catalog, &query));
+    all.extend(playlists_of(
+        streaming.playlists,
+        local.playlists,
+        &catalog.playlists,
+        &query,
+    ));
     order(&mut all);
 
     all.into_iter().map(|scored| scored.hit).collect()
 }
 
-fn songs(library: &[Track], catalog: &[Track], query: &Query) -> Vec<Scored> {
+fn songs(
+    streaming: &ShelfData<'_>,
+    local: &ShelfData<'_>,
+    catalog: &[Track],
+    query: &Query,
+) -> Vec<Scored> {
     let mut scored: Vec<Scored> = Vec::new();
 
-    for (track, rank) in sources(library, catalog) {
-        if rank.is_some() && kept(library, track) {
+    for (track, rank) in sources(streaming.tracks, local.tracks, catalog) {
+        if rank.is_some() && kept(streaming.tracks, local.tracks, track) {
             continue;
         }
 
@@ -404,8 +435,13 @@ fn songs(library: &[Track], catalog: &[Track], query: &Query) -> Vec<Scored> {
     capped(scored)
 }
 
-fn albums_of(albums: &[Album], library: &[Track], catalog: &Catalog, query: &Query) -> Vec<Scored> {
-    let saved = albums.iter().map(|album| {
+fn albums_of(
+    streaming: &ShelfData<'_>,
+    local: &ShelfData<'_>,
+    catalog: &Catalog,
+    query: &Query,
+) -> Vec<Scored> {
+    let saved = streaming.albums.iter().chain(local.albums).map(|album| {
         (
             &album.id,
             &album.name,
@@ -430,19 +466,20 @@ fn albums_of(albums: &[Album], library: &[Track], catalog: &Catalog, query: &Que
             album.year,
         )
     });
-    let derived = sources(library, &catalog.tracks).filter_map(|(track, rank)| {
-        let id = track.album_id.as_ref()?;
-        Some((
-            id,
-            &track.album,
-            &track.artists,
-            &track.artist_refs,
-            &track.cover,
-            rank,
-            track.popularity,
-            0,
-        ))
-    });
+    let derived =
+        sources(streaming.tracks, local.tracks, &catalog.tracks).filter_map(|(track, rank)| {
+            let id = track.album_id.as_ref()?;
+            Some((
+                id,
+                &track.album,
+                &track.artists,
+                &track.artist_refs,
+                &track.cover,
+                rank,
+                track.popularity,
+                0,
+            ))
+        });
 
     let mut scored: Vec<Scored> = Vec::new();
     let mut seen: Vec<&String> = Vec::new();
@@ -475,9 +512,17 @@ fn albums_of(albums: &[Album], library: &[Track], catalog: &Catalog, query: &Que
     capped(scored)
 }
 
-fn playlists_of(playlists: &[Playlist], catalog: &[Playlist], query: &Query) -> Vec<Scored> {
+fn playlists_of(
+    playlists: &[Playlist],
+    local_playlists: &[Playlist],
+    catalog: &[Playlist],
+    query: &Query,
+) -> Vec<Scored> {
     let total = catalog.len();
-    let saved = playlists.iter().map(|playlist| (playlist, None));
+    let saved = playlists
+        .iter()
+        .chain(local_playlists)
+        .map(|playlist| (playlist, None));
     let found = catalog
         .iter()
         .enumerate()
@@ -514,9 +559,9 @@ fn playlists_of(playlists: &[Playlist], catalog: &[Playlist], query: &Query) -> 
 }
 
 fn artists(
-    library: &[Track],
+    streaming: &ShelfData<'_>,
+    local: &ShelfData<'_>,
     catalog: &[Track],
-    albums: &[Album],
     portraits: &HashMap<String, String>,
     query: &Query,
 ) -> Vec<Scored> {
@@ -556,7 +601,7 @@ fn artists(
         }
     };
 
-    for (track, rank) in sources(library, catalog) {
+    for (track, rank) in sources(streaming.tracks, local.tracks, catalog) {
         for artist in &track.artist_refs {
             let Some(score) = favored(named(&artist.name, query), rank).max(inherited(rank)) else {
                 continue;
@@ -565,7 +610,7 @@ fn artists(
             record(artist, score, track.popularity, mine);
         }
     }
-    for album in albums {
+    for album in streaming.albums.iter().chain(local.albums) {
         for artist in &album.artist_refs {
             let Some(score) = favored(named(&artist.name, query), None) else {
                 continue;
@@ -588,16 +633,21 @@ fn artists(
 
 fn sources<'a>(
     library: &'a [Track],
+    local: &'a [Track],
     catalog: &'a [Track],
 ) -> impl Iterator<Item = (&'a Track, Option<u32>)> {
     let total = catalog.len();
 
-    library.iter().map(|track| (track, None)).chain(
-        catalog
-            .iter()
-            .enumerate()
-            .map(move |(at, track)| (track, Some(placed(at, total)))),
-    )
+    library
+        .iter()
+        .chain(local)
+        .map(|track| (track, None))
+        .chain(
+            catalog
+                .iter()
+                .enumerate()
+                .map(move |(at, track)| (track, Some(placed(at, total)))),
+        )
 }
 
 fn placed(at: usize, total: usize) -> u32 {
@@ -647,11 +697,13 @@ fn salvaged<T>(found: Result<Vec<T>>, kept: Vec<T>, trouble: &mut Vec<String>) -
     }
 }
 
-fn kept(library: &[Track], track: &Track) -> bool {
-    track
-        .id
-        .as_ref()
-        .is_some_and(|id| library.iter().any(|kept| kept.id.as_ref() == Some(id)))
+fn kept(library: &[Track], local: &[Track], track: &Track) -> bool {
+    track.id.as_ref().is_some_and(|id| {
+        library
+            .iter()
+            .chain(local)
+            .any(|kept| kept.id.as_ref() == Some(id))
+    })
 }
 
 fn score(value: &str, term: &str) -> u32 {
@@ -704,7 +756,21 @@ mod tests {
             ..Catalog::default()
         };
 
-        super::rank(library, albums, &[], &catalog, &HashMap::new(), asked)
+        super::rank(
+            ShelfData {
+                tracks: library,
+                albums,
+                playlists: &[],
+            },
+            ShelfData {
+                tracks: &[],
+                albums: &[],
+                playlists: &[],
+            },
+            &catalog,
+            &HashMap::new(),
+            asked,
+        )
     }
 
     fn track(name: &str, artists: &str, album: &str) -> Track {
@@ -885,9 +951,16 @@ mod tests {
 
         let portraits = HashMap::from([("artist-one".to_owned(), "https://portrait".to_owned())]);
         let hits = super::rank(
-            &[portrait],
-            &[],
-            &[],
+            ShelfData {
+                tracks: &[portrait],
+                albums: &[],
+                playlists: &[],
+            },
+            ShelfData {
+                tracks: &[],
+                albums: &[],
+                playlists: &[],
+            },
             &Catalog::default(),
             &portraits,
             "echo",

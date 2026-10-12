@@ -7,6 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Deezer now fills Home with the account's own sections: Flow as Quick picks, the
+  personalized mixes (Discovery, New releases, Monthly top, Inspired by) under a Mixes
+  shelf, and the curated charts and channels the service recommends.
+- Deezer genres and channels open as genre pages, user profiles show their playlists, and
+  playlists can be followed, unfollowed and made public or private.
+- Every shelf's Mixes page deals more mixes: a favorites mix, a forgotten favorites mix, a
+  discovery mix of unheard artists, decade mixes from the library's years, seasonal mixes
+  and a card of its own for the top artists.
+- A source badge on the player bar and in search results names the provider a track comes
+  from when more than one is connected, so a Deezer track and a Local Files track are
+  told apart at a glance.
+- Search now folds the local library into its results alongside the streaming provider.
+
+### Fixed
+
+- A Deezer artist page no longer lists other artists' releases: the discography comes
+  from the artist-specific endpoint, and the albums rail shows only the artist's own
+  releases.
+
 ## [0.42.15] - 2026-10-11
 
 ### Fixed

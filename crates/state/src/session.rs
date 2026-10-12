@@ -336,6 +336,11 @@ impl Session {
         self.provider_for(id).map(|provider| provider.slug())
     }
 
+    /// The display name of the provider an id belongs to, whichever shelf it sits on.
+    pub fn name_for(&self, id: &str) -> Option<&'static str> {
+        self.provider_for(id).map(|provider| provider.name())
+    }
+
     /// The provider an id belongs to, whichever shelf it sits on.
     pub(crate) fn provider_for(&self, id: &str) -> Option<&dyn MusicProvider> {
         match music::is_local_id(id) {

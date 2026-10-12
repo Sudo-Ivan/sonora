@@ -16,6 +16,23 @@ pub(crate) fn day() -> u64 {
         / DAY
 }
 
+/// The first `MEMBERS` artists of a ranked list, as a mix's members. A helper rather than a
+/// method so themed mixes and clusters gather the same way.
+fn head<'a, 'b, 'c>(artists: &[(&'a str, &'b Artist<'c>)]) -> Vec<(&'a str, &'b Artist<'c>)> {
+    artists.iter().take(MEMBERS).copied().collect()
+}
+
+/// The current UTC month, 1 through 12, from the same clock the daily salt reads. A
+/// seasonal mix turns over with the year rather than with the day.
+fn month() -> u32 {
+    let z = day() as i64 + 719_468;
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    ((mp + 2) % 12 + 1) as u32
+}
+
 /// How long until `day()` answers differently, for the observer that wakes the shelf then.
 pub(crate) fn day_left() -> Duration {
     let secs = SystemTime::now()
@@ -38,6 +55,10 @@ pub(crate) const FOREVER_BATCH: usize = 20;
 /// How far back listening history still counts as already heard for the forever queue, and
 /// how deep a play can sit before it stops weighing on taste and recency.
 pub(crate) const FOREVER_HISTORY: usize = 200;
+
+/// How many single-artist mixes follow the themed and cluster ones on the Mixes page: the
+/// artists the shelf's listener loves most that no other mix is already named for.
+pub(crate) const SOLOS: usize = 8;
 
 /// How many artists a mix gathers at most. The lead fronts it and the rest widen what it
 /// scores for; past a handful a cluster stops meaning anything.
@@ -126,6 +147,9 @@ pub struct Mix {
     pub seed: Track,
     /// The artist keys the mix scores for, lead first.
     pub(crate) members: Vec<String>,
+    /// A Fluent key for the card's title instead of "{name} Mix", set on the mixes named
+    /// for a theme rather than for artists.
+    pub title: Option<&'static str>,
 }
 
 impl Mix {
@@ -135,6 +159,7 @@ impl Mix {
             name: lead_name(seed).to_owned(),
             seed: seed.clone(),
             members: vec![artist_key(seed).to_owned()],
+            title: None,
         }
     }
 }
@@ -434,7 +459,188 @@ pub(crate) fn seeds(index: &Index, limit: usize) -> Vec<Mix> {
                     .join(", "),
                 seed: index.tracks[cluster[0].1.best].clone(),
                 members: cluster.iter().map(|(key, _)| (*key).to_owned()).collect(),
+                title: None,
             }
+        })
+        .collect()
+}
+
+/// One themed mix around `members`, lead first. The `title` names it on the page in place
+/// of "{name} Mix"; `None` leaves the member names to speak for it.
+fn named(index: &Index, title: Option<&'static str>, members: Vec<(&str, &Artist)>) -> Mix {
+    Mix {
+        name: members
+            .iter()
+            .map(|(_, artist)| artist.name)
+            .collect::<Vec<_>>()
+            .join(", "),
+        seed: index.tracks[members[0].1.best].clone(),
+        members: members.iter().map(|(key, _)| (*key).to_owned()).collect(),
+        title,
+    }
+}
+
+/// The mixes named for something other than an artist cluster: the listener's own
+/// favorites and forgotten corners, the unheard stretch of the shelf, the decades the
+/// library's years make and whatever the season's tags point at. Each rides the same
+/// scoring as a cluster mix; only who it is named for differs.
+pub(crate) fn themed(index: &Index) -> Vec<Mix> {
+    let mut mixes = Vec::new();
+    let mut ranked: Vec<(&str, &Artist)> = index.artists.iter().map(|(key, a)| (*key, a)).collect();
+    ranked.sort_by(|(a_key, a), (b_key, b)| {
+        b.taste()
+            .total_cmp(&a.taste())
+            .then_with(|| a_key.cmp(b_key))
+    });
+
+    let starred: Vec<(&str, &Artist)> = ranked
+        .iter()
+        .copied()
+        .filter(|(_, artist)| artist.starred > 0)
+        .collect();
+    if starred.len() >= MEMBERS {
+        mixes.push(named(index, Some("mix-favorites"), head(&starred)));
+    }
+
+    let forgotten: Vec<(&str, &Artist)> = starred
+        .iter()
+        .copied()
+        .filter(|(_, artist)| artist.recent == 0.)
+        .collect();
+    if forgotten.len() >= MEMBERS {
+        mixes.push(named(index, Some("mix-forgotten"), head(&forgotten)));
+    }
+
+    let mut unheard: Vec<(&str, &Artist)> = ranked
+        .iter()
+        .copied()
+        .filter(|(_, artist)| artist.starred == 0 && artist.recent == 0.)
+        .collect();
+    // unheard artists share a taste score of nearly zero, so the salt settles who leads.
+    unheard.sort_by(|(a_key, _), (b_key, _)| {
+        jitter(b_key, index.salt).total_cmp(&jitter(a_key, index.salt))
+    });
+    if unheard.len() >= MEMBERS {
+        mixes.push(named(index, Some("mix-discovery"), head(&unheard)));
+    }
+
+    if let Some(seasonal) = season(index, &ranked) {
+        mixes.push(seasonal);
+    }
+
+    // The decades the shelf's album years make, biggest presence first, two at most so the
+    // page does not turn into a timeline.
+    let mut decades: HashMap<i32, Vec<(&str, &Artist)>> = HashMap::new();
+    for &(key, artist) in &ranked {
+        if artist.year_count > 0 {
+            let decade = (artist.year_total / artist.year_count as i64) as i32 / 10 * 10;
+            decades.entry(decade).or_default().push((key, artist));
+        }
+    }
+    let mut decades: Vec<(i32, Vec<(&str, &Artist)>)> = decades.into_iter().collect();
+    decades.sort_by(|(_, a), (_, b)| {
+        let taste = |members: &Vec<(&str, &Artist)>| {
+            members
+                .iter()
+                .map(|(_, artist)| artist.taste())
+                .sum::<f32>()
+        };
+        taste(b).total_cmp(&taste(a))
+    });
+    for (decade, members_for_decade) in decades.into_iter().take(2) {
+        if members_for_decade.len() < 2 {
+            continue;
+        }
+        let mut mix = named(index, None, head(members_for_decade.as_slice()));
+        mix.name = format!("{decade}s");
+        mixes.push(mix);
+    }
+
+    mixes
+}
+
+/// The season the UTC month calls for, as a mix of the artists whose tags carry it. None
+/// when the month has no season or no artist wears it, so the page never promises a mix
+/// it cannot fill.
+fn season(index: &Index, ranked: &[(&str, &Artist)]) -> Option<Mix> {
+    let (title, tags): (&'static str, &[&str]) = match month() {
+        10 => ("mix-halloween", &["halloween", "spooky", "horror"]),
+        12 | 1 => (
+            "mix-holiday",
+            &["christmas", "xmas", "holiday", "noel", "winter"],
+        ),
+        6..=8 => ("mix-summer", &["summer", "beach", "surf"]),
+        _ => return None,
+    };
+    let seasonal = |track: &Track| {
+        track
+            .tags
+            .iter()
+            .map(|tag| normalize(tag))
+            .any(|tag| tags.iter().any(|wanted| tag.contains(wanted)))
+    };
+    let members: Vec<(&str, &Artist)> = ranked
+        .iter()
+        .copied()
+        .filter(|(_, artist)| {
+            artist
+                .tags
+                .keys()
+                .any(|tag| tags.iter().any(|wanted| tag.contains(wanted)))
+        })
+        .take(MEMBERS)
+        .collect();
+    if members.is_empty() {
+        return None;
+    }
+    let mut mix = named(index, Some(title), members.clone());
+    // The lead's best track may not be a seasonal one; the seed should already sound like
+    // the mix it fronts, so it is picked among the members' tagged tracks instead.
+    let seed = members
+        .iter()
+        .flat_map(|(_, artist)| {
+            artist
+                .tracks
+                .iter()
+                .map(|slot| index.tracks[*slot])
+                .filter(|track| seasonal(track))
+        })
+        .max_by(|a, b| {
+            let rank = |track: &Track| {
+                POPULARITY * track.popularity as f32 / 100.
+                    + track.playcount.map_or(0., |count| (count as f32 + 1.).ln())
+                    + SEED_JITTER * jitter(track.id.as_deref().unwrap_or_default(), index.salt)
+            };
+            rank(a).total_cmp(&rank(b))
+        })
+        .cloned();
+    if let Some(seed) = seed {
+        mix.seed = seed;
+    }
+    Some(mix)
+}
+
+/// The single-artist mixes that follow the clusters: the top-taste artists no themed mix
+/// or cluster is already named for, each dealt a card of its own.
+pub(crate) fn solos(index: &Index, dealt: &[Mix], limit: usize) -> Vec<Mix> {
+    let fronted: HashSet<&str> = dealt
+        .iter()
+        .filter_map(|mix| mix.members.first().map(String::as_str))
+        .collect();
+    let mut ranked: Vec<(&str, &Artist)> = index.artists.iter().map(|(key, a)| (*key, a)).collect();
+    ranked.sort_by(|(a_key, a), (b_key, b)| {
+        b.taste()
+            .total_cmp(&a.taste())
+            .then_with(|| a_key.cmp(b_key))
+    });
+    ranked
+        .into_iter()
+        .filter(|(key, _)| !fronted.contains(key))
+        .take(limit)
+        .map(|(key, artist)| {
+            let mut mix = named(index, None, vec![(key, artist)]);
+            mix.name = artist.name.to_owned();
+            mix
         })
         .collect()
 }

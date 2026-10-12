@@ -56,6 +56,12 @@ library-no-favorites = No favorites yet
 library-no-mixes = No mixes yet
 library-no-genres = No genres found
 library-artist-mix = { $artist } Mix
+mix-favorites = Favorites mix
+mix-forgotten = Forgotten favorites mix
+mix-discovery = Discovery mix
+mix-halloween = Halloween mix
+mix-holiday = Holiday mix
+mix-summer = Summer mix
 library-no-matches = No matches
 library-not-loaded = Your library did not load
 library-scanning = Looking through your folders...
@@ -388,6 +394,9 @@ home-playlists = Playlists
 home-favorite-albums = Favorite albums
 home-artists = Artists
 home-collection-albums = Albums from your collection
+home-top-albums = Top albums
+home-top-artists = Top artists
+home-top-playlists = Top playlists
 
 # search page
 search-placeholder = What do you want to listen to?

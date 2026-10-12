@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::{Album, ArtistRef, Playlist, ReleaseType, SavedArtist, Track};
+use crate::{
+    Album, ArtistRef, Genre, GenreItem, Playlist, ReleaseType, SavedArtist, Track, UserDetail,
+};
 
 /// A track id is a numeric string. Zero and negative ids are user uploads, which the
 /// streaming endpoints treat differently; the sign stays in the string.
@@ -245,7 +247,7 @@ pub fn track(value: &Value) -> Option<Track> {
         added_at: when(value, &["ADDED_AT", "time_add", "DATE_ADD"]),
         added_by: None,
         playcount: None,
-        popularity: number(value, &["RANK", "rank"])
+        popularity: number(value, &["RANK", "rank", "RANK_SNG"])
             .map(|rank| (rank / 10_000).min(100) as u32)
             .unwrap_or(0),
         explicit: truthy(value, &["explicit_lyrics", "EXPLICIT_LYRICS"]),
@@ -295,10 +297,14 @@ pub fn album(value: &Value) -> Option<Album> {
         artist_refs,
         cover: cover(value, 300),
         cover_large: cover(value, 1000),
-        release_type: match text(value, &["record_type"]) {
-            Some("single") => ReleaseType::Single,
-            Some("ep") => ReleaseType::Ep,
-            Some("compile") => ReleaseType::Compilation,
+        release_type: match (
+            text(value, &["record_type"]),
+            truthy(&value["SUBTYPES"], &["isCompilation"]),
+            text(value, &["TYPE"]),
+        ) {
+            (Some("compile"), _, _) | (_, true, _) => ReleaseType::Compilation,
+            (Some("single"), _, _) | (_, _, Some("0")) => ReleaseType::Single,
+            (Some("ep"), _, _) => ReleaseType::Ep,
             _ => ReleaseType::Album,
         },
         year,
@@ -369,4 +375,200 @@ pub fn saved_artist(value: &Value) -> Option<SavedArtist> {
         cover: artist_picture(value, 300),
         added_at: when(value, &["ADDED_AT", "time_add", "DATE_ADD"]),
     })
+}
+
+/// One genre from the public `/genre` list. Its picture fields are urls rather than hashes.
+pub fn genre(value: &Value) -> Option<Genre> {
+    Some(Genre {
+        id: id(&value["id"])?,
+        name: text(value, &["name"])?.to_owned(),
+        cover: text(value, &["picture_medium"])
+            .or_else(|| text(value, &["picture"]))
+            .map(str::to_owned),
+    })
+}
+
+/// One user profile from the public `/user/{id}` object.
+pub fn user(value: &Value) -> Option<UserDetail> {
+    Some(UserDetail {
+        id: id(&value["id"])?,
+        name: text(value, &["name"]).unwrap_or_default().to_owned(),
+        avatar: text(value, &["picture_xl"])
+            .or_else(|| text(value, &["picture_big"]))
+            .map(str::to_owned),
+        followers: number(value, &["nb_fan"]),
+        following: None,
+        playlists: Vec::new(),
+    })
+}
+
+/// A genre radio the public `/radio` family lists, modelled as a playlist so a card can
+/// play it. The `radio:` prefix is what `playlist` later routes on.
+pub fn radio(value: &Value) -> Option<Playlist> {
+    Some(Playlist {
+        id: format!("radio:{}", id(&value["id"])?),
+        name: text(value, &["title"])?.to_owned(),
+        owner: "Deezer".to_owned(),
+        owner_id: String::new(),
+        owned: false,
+        collaborative: false,
+        blend: false,
+        public: true,
+        cover: text(value, &["picture_medium"])
+            .or_else(|| text(value, &["picture"]))
+            .map(str::to_owned),
+        track_count: 0,
+        modified_at: None,
+    })
+}
+
+/// The first usable cover in a `page.get` item's `pictures` list, built from the picture's
+/// own kind and hash.
+fn picture(value: &Value, size: u32) -> Option<String> {
+    let pictures = value.get("pictures")?.as_array()?;
+    pictures.iter().find_map(|picture| {
+        let md5 = text(picture, &["md5", "MD5"]);
+        let kind = text(picture, &["type", "TYPE"]).unwrap_or("cover");
+        image(kind, md5, size)
+    })
+}
+
+/// One card of a `page.get` section. The item's `type` decides the shelf item it becomes;
+/// types the app cannot draw or play, like shows and livestreams, come out as `None` and
+/// the section just skips them.
+pub fn page_item(item: &Value, user_id: &str) -> Option<GenreItem> {
+    let data = item.get("data").cloned().unwrap_or(Value::Null);
+    let kind = text(item, &["type"])?;
+    let target = text(item, &["target"]).unwrap_or_default();
+    match kind {
+        "album" => album(&data).map(GenreItem::Album),
+        "playlist" => playlist(&data, user_id).map(GenreItem::Playlist),
+        "artist" => saved_artist(&data).map(GenreItem::Artist),
+        "song" | "track" => track(&data).map(GenreItem::Track),
+        "channel" => {
+            let slug = target
+                .rsplit('/')
+                .next()
+                .filter(|slug| !slug.is_empty() && *slug != "channels")
+                .or_else(|| text(&data, &["slug", "SLUG", "CHANNEL_SLUG"]))?;
+            Some(GenreItem::Genre(Genre {
+                id: format!("channel:{slug}"),
+                name: text(item, &["title"])
+                    .or_else(|| text(&data, &["title", "TITLE", "CHANNEL_NAME"]))
+                    .unwrap_or_default()
+                    .to_owned(),
+                cover: picture(item, 300),
+            }))
+        }
+        "smarttracklist" => {
+            let tracklist = target
+                .rsplit('/')
+                .next()
+                .filter(|id| !id.is_empty() && *id != "smarttracklist")
+                .or_else(|| text(&data, &["SMARTTRACKLIST_ID", "CONFIGURATION_ID"]))?;
+            let mut card = Playlist {
+                id: format!("smarttracklist:{tracklist}"),
+                name: text(item, &["title"])
+                    .or_else(|| text(&data, &["TITLE"]))
+                    .unwrap_or_default()
+                    .to_owned(),
+                owner: "Deezer".to_owned(),
+                owner_id: String::new(),
+                owned: false,
+                collaborative: false,
+                blend: false,
+                public: true,
+                cover: picture(item, 300).or_else(|| {
+                    image(
+                        "cover",
+                        text(&data["COVER"], &["MD5"]).or_else(|| {
+                            data["PICTURES"]
+                                .as_array()
+                                .and_then(|list| list.first())
+                                .and_then(|first| text(first, &["MD5"]))
+                        }),
+                        300,
+                    )
+                }),
+                track_count: 0,
+                modified_at: None,
+            };
+            if card.cover.is_none() {
+                card.cover = cover(&data, 300);
+            }
+            Some(GenreItem::Playlist(card))
+        }
+        "flow" => Some(GenreItem::Playlist(Playlist {
+            id: "flow".to_owned(),
+            name: text(item, &["title"]).unwrap_or("Flow").to_owned(),
+            owner: "Deezer".to_owned(),
+            owner_id: String::new(),
+            owned: false,
+            collaborative: false,
+            blend: false,
+            public: true,
+            cover: picture(item, 300),
+            track_count: 0,
+            modified_at: None,
+        })),
+        "radio" => {
+            let mut card = radio(&data)?;
+            card.cover = card.cover.or_else(|| picture(item, 300));
+            Some(GenreItem::Playlist(card))
+        }
+        _ => None,
+    }
+}
+
+/// The `page.get` results' sections, minus the ones holding nothing drawable.
+pub fn page_sections(results: &Value, user_id: &str) -> Vec<crate::GenreSection> {
+    results
+        .get("sections")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|section| {
+            let title = text(section, &["title", "TITLE"])?.to_owned();
+            let items: Vec<GenreItem> = section
+                .get("items")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|item| page_item(item, user_id))
+                .collect();
+            (!items.is_empty()).then_some(crate::GenreSection { title, items })
+        })
+        .collect()
+}
+
+/// The biography `deezer.pageArtist` hands over as html, as plain text: block tags become
+/// paragraph breaks and every other tag just comes out.
+pub fn biography(html: &str) -> Option<String> {
+    let mut blocks = String::with_capacity(html.len());
+    let mut inside = false;
+    let mut tag = String::new();
+    for byte in html.bytes() {
+        match (byte, inside) {
+            (b'<', false) => inside = true,
+            (b'>', true) => {
+                inside = false;
+                let name = tag.split_whitespace().next().unwrap_or_default();
+                if matches!(name.trim_end_matches('/'), "p" | "br" | "div" | "/p") {
+                    blocks.push('\n');
+                }
+                tag.clear();
+            }
+            (_, true) => tag.push(byte as char),
+            (_, false) => blocks.push(byte as char),
+        }
+    }
+    let text: Vec<&str> = blocks
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let joined = text.join("\n\n");
+    (!joined.is_empty()).then_some(joined)
 }
