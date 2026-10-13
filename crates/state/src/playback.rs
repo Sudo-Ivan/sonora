@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
@@ -9,7 +10,7 @@ use gpui::{App, Context, Entity, EventEmitter, SharedString, Task};
 use music::equalizer::{Equalizer, Gains};
 use music::{
     MusicApi, PlaybackConfig, PlaybackEvent as BackendEvent, PlaybackEvents, PlaybackFactory,
-    Player, Spectrum, Track,
+    Player, Spectrum, StreamCache, Track,
 };
 use ui::{Pin, PinKind};
 
@@ -371,6 +372,9 @@ pub struct Playback {
     level: f32,
     normalisation: bool,
     gapless: bool,
+    /// The stream cache's limit in bytes, shared with every engine so a settings change
+    /// reaches a running one.
+    stream_limit: Arc<AtomicU64>,
     /// Shared with every engine started here, so a change reaches the output without a restart.
     equalizer: Equalizer,
     repeat: Repeat,
@@ -484,6 +488,9 @@ impl Playback {
         let repeat = settings.read(cx).repeat();
         let radio = settings.read(cx).radio();
         let forever = settings.read(cx).forever();
+        let stream_limit = Arc::new(AtomicU64::new(
+            settings.read(cx).stream_cache_mb() * 1024 * 1024,
+        ));
 
         let mut playback = Self {
             state: PlaybackState::Idle,
@@ -498,6 +505,7 @@ impl Playback {
             level,
             normalisation,
             gapless,
+            stream_limit,
             equalizer,
             repeat,
             radio,
@@ -2270,6 +2278,27 @@ impl Playback {
         self.restart_engine(cx);
     }
 
+    /// How many megabytes of streamed audio the cache may keep.
+    pub fn stream_cache_mb(&self) -> u64 {
+        self.stream_limit.load(Ordering::Relaxed) / (1024 * 1024)
+    }
+
+    /// Changes the stream cache's limit. The shared atomic reaches running engines at once,
+    /// and turning it off gives the kept tracks back.
+    pub fn set_stream_cache(&mut self, mb: u64, cx: &mut Context<Self>) {
+        if self.stream_cache_mb() == mb {
+            return;
+        }
+        self.stream_limit
+            .store(mb.saturating_mul(1024 * 1024), Ordering::Relaxed);
+        self.settings
+            .update(cx, |settings, cx| settings.set_stream_cache_mb(mb, cx));
+        if mb == 0 {
+            Io::global(cx).spawn_blocking(StreamCache::clear);
+        }
+        cx.notify();
+    }
+
     /// Whether the current track plays through the local engine.
     fn local_active(&self) -> bool {
         self.track
@@ -2363,12 +2392,18 @@ impl Playback {
 
     /// Builds the streaming engine and starts pumping its events.
     fn start_engine(&mut self, playback: Arc<dyn PlaybackFactory>, cx: &mut Context<Self>) {
+        let stream_cache = self
+            .session
+            .read(cx)
+            .provider_slug()
+            .map(|slug| StreamCache::new(slug, self.stream_limit.clone()));
         let config = PlaybackConfig {
             normalisation: self.normalisation,
             gapless: self.gapless,
             position_interval: POSITION_INTERVAL,
             gain: gain(self.level),
             equalizer: self.equalizer.clone(),
+            stream_cache,
         };
         let (engine, events) = playback.start(config);
 
@@ -2391,6 +2426,8 @@ impl Playback {
             position_interval: POSITION_INTERVAL,
             gain: gain(self.level),
             equalizer: self.equalizer.clone(),
+            // Local tracks are already files; the engine needs no copy of them.
+            stream_cache: None,
         };
         let (engine, events) = playback.start(config);
 

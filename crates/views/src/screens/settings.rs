@@ -68,6 +68,9 @@ const MOTION: &str = "motion";
 const PACE: &str = "pace";
 const SAVER: &str = "saver";
 const SLEEP: &str = "sleep";
+const STREAM_CACHE: &str = "stream-cache";
+/// The stream cache sizes the picker offers, in megabytes.
+const CACHE_SIZES: [u64; 6] = [0, 256, 512, 1024, 2048, 4096];
 const EQUALIZER_PRESETS: &str = "equalizer-presets";
 // the step a dragged band snaps to, in decibels
 const EQUALIZER_STEP: f32 = 0.5;
@@ -162,6 +165,7 @@ enum Slot {
     Gapless,
     Sleep,
     StayAwake,
+    StreamCache,
     Equalizer,
     EqualizerPreset,
     EqualizerBands,
@@ -548,6 +552,7 @@ impl SettingsView {
                     Slot::Title("settings-tab-general"),
                     Slot::Normalisation,
                     Slot::Gapless,
+                    Slot::StreamCache,
                     Slot::Sleep,
                     Slot::StayAwake,
                 ];
@@ -694,6 +699,10 @@ impl SettingsView {
                 t!("settings-normalisation-detail"),
             ),
             Slot::Gapless => (t!("settings-gapless"), t!("settings-gapless-detail")),
+            Slot::StreamCache => (
+                t!("settings-stream-cache"),
+                t!("settings-stream-cache-detail"),
+            ),
             Slot::Sleep => (t!("settings-sleep"), t!("settings-sleep-detail")),
             Slot::StayAwake => (t!("settings-stay-awake"), t!("settings-stay-awake-detail")),
             Slot::Equalizer => (t!("settings-equalizer"), t!("settings-equalizer-detail")),
@@ -855,6 +864,7 @@ impl SettingsView {
             Slot::AdaptiveMenu => self.adaptive_menu_row(cx).element,
             Slot::Normalisation => self.playback_row(cx).element,
             Slot::Gapless => self.gapless_row(cx).element,
+            Slot::StreamCache => self.stream_cache_row(cx).element,
             Slot::Sleep => self.sleep_row(cx).element,
             Slot::StayAwake => self.stay_awake_row(cx).element,
             Slot::Equalizer => self.equalizer_row(cx).element,
@@ -2106,6 +2116,32 @@ impl SettingsView {
                         .update(cx, |playback, cx| playback.set_gapless(!on, cx));
                 }))
                 .into_any_element(),
+        )
+    }
+
+    fn stream_cache_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.playback.read(cx).stream_cache_mb();
+
+        let picker = Picker::new(STREAM_CACHE, &self.popovers, cache_size(current))
+            .width(Picker::NARROW)
+            .items(CACHE_SIZES.into_iter().map(|size| {
+                MenuItem::new(size.to_string(), cache_size(size))
+                    .selected(size == current)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.playback
+                            .update(cx, |playback, cx| playback.set_stream_cache(size, cx));
+                    }))
+            }));
+
+        self.row(
+            t!("settings-stream-cache"),
+            t!("settings-stream-cache-detail"),
+            muted,
+            small,
+            picker.into_any_element(),
         )
     }
 
@@ -4224,6 +4260,17 @@ fn sleep_label(sleep: Option<Sleep>) -> SharedString {
         Some(Sleep::EndOfTrack) => t!("settings-sleep-end-of-track"),
         Some(Sleep::After(after)) => t!("settings-sleep-minutes", count = after.as_secs() / 60),
         None => t!("settings-sleep-off"),
+    }
+}
+
+/// A stream cache size as the picker shows it, in megabytes below a gigabyte.
+fn cache_size(mb: u64) -> SharedString {
+    match mb {
+        0 => t!("settings-stream-cache-off"),
+        mb if mb >= 1024 && mb % 1024 == 0 => {
+            t!("settings-stream-cache-gb", size = mb / 1024)
+        }
+        mb => t!("settings-stream-cache-mb", size = mb),
     }
 }
 

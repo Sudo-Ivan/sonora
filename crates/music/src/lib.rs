@@ -1,4 +1,5 @@
 mod audio;
+pub mod cache;
 pub mod credentials;
 pub mod deezer;
 pub mod engine;
@@ -28,6 +29,7 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use async_trait::async_trait;
 
+pub use cache::{CachedMeta, StreamCache};
 pub use equalizer::Equalizer;
 pub use models::{
     Album, AlbumCatalogue, AlbumDetail, Artist, ArtistCatalogue, ArtistProfile, ArtistRef,
@@ -331,6 +333,9 @@ pub struct PlaybackConfig {
     pub position_interval: Duration,
     pub gain: f32,
     pub equalizer: Equalizer,
+    /// Where the engine may keep downloaded tracks for replay, `None` to keep nothing or
+    /// for an engine whose tracks are already files, like the local one.
+    pub stream_cache: Option<StreamCache>,
 }
 
 /// What an engine reports back. `Playing` and `Seeked` mean audio from `at` is reaching the

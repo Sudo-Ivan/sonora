@@ -7,6 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Streamed tracks are cached on disk so they replay instantly without downloading again,
+  for Deezer and Subsonic. Deezer tracks stay encrypted exactly as they arrive, so nothing
+  readable is ever stored. The cache size is a setting, from off to 4 GB, with the least
+  recently played tracks evicted first.
+- Deezer's home mixes now load in parallel instead of one after another.
+
 ## [0.42.16] - 2026-10-12
 
 ### Added

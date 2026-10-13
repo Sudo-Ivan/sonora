@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 
+use crate::cache::{CachedMeta, StreamCache, Tee};
 use crate::engine::{self, Fetch, Loudness};
 use crate::stream::{Plain, Reader, Stream};
 use crate::subsonic::client::{Details, SubsonicClient};
@@ -36,6 +37,7 @@ impl PlaybackFactory for Factory {
         engine::start(
             Subsonic {
                 client: self.client.clone(),
+                cache: config.stream_cache.clone(),
             },
             config,
         )
@@ -44,6 +46,7 @@ impl PlaybackFactory for Factory {
 
 struct Subsonic {
     client: SubsonicClient,
+    cache: Option<StreamCache>,
 }
 
 #[async_trait]
@@ -56,16 +59,40 @@ impl Fetch for Subsonic {
     }
 
     /// Opens the stream and asks for the length and loudness at the same time, so neither round
-    /// trip waits on the other. The preroll usually covers the lookup entirely.
+    /// trip waits on the other. The preroll usually covers the lookup entirely. A cached
+    /// track skips both requests and streams from the stored file instead.
     async fn load(&self, id: &str) -> Result<Loaded> {
-        let (stream, details) = tokio::join!(
-            async { Stream::open(self.client.open_stream(id).await?, Plain).await },
-            self.client.details(id),
-        );
-        Ok(Loaded {
-            stream: stream?,
-            details,
-        })
+        if let Some(hit) = self.cache.as_ref().and_then(|cache| cache.get(id)) {
+            let total = hit.bytes;
+            let meta = hit.meta.clone();
+            let stream = Stream::pulling(hit, Some(total), Plain).primed().await?;
+            return Ok(Loaded {
+                stream,
+                details: Details {
+                    duration: meta.duration(),
+                    loudness: meta.loudness(),
+                },
+            });
+        }
+        let (response, details) =
+            tokio::join!(self.client.open_stream(id), self.client.details(id),);
+        let response = response?;
+        let total = response.content_length();
+        let meta = CachedMeta {
+            track: id.to_owned(),
+            duration_secs: details.duration.map(|d| d.as_secs_f64()),
+            lufs: details.loudness.map(|loudness| loudness.lufs),
+            ..CachedMeta::default()
+        };
+        let stream = match self.cache.as_ref().and_then(|cache| cache.store(id, meta)) {
+            Some(store) => {
+                Stream::pulling(Tee::new(response, store), total, Plain)
+                    .primed()
+                    .await?
+            }
+            None => Stream::open(response, Plain).await?,
+        };
+        Ok(Loaded { stream, details })
     }
 
     fn length(&self, loaded: &Loaded) -> Option<Duration> {

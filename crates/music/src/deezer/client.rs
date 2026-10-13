@@ -128,6 +128,9 @@ struct Inner {
 /// A track's audio as it starts to arrive, with the key that decrypts it and what the gateway
 /// said about its length and loudness.
 pub struct Opened {
+    /// The id the stream answers for, which a region fallback may not share with the
+    /// requested id.
+    pub id: String,
     pub response: reqwest::Response,
     pub key: decrypt::Secret,
     pub duration: Option<Duration>,
@@ -657,10 +660,10 @@ impl DeezerClient {
     }
 
     /// A card for every smart tracklist the account has, named the way Deezer names them.
-    /// A tracklist the gateway does not know, or one that names nothing back, is left out.
+    /// The lookups run together, paced by the slot like every gateway call, and a tracklist
+    /// the gateway does not know, or one that names nothing back, is left out.
     async fn mix_cards(&self) -> Vec<GenreItem> {
-        let mut items = Vec::new();
-        for tracklist_id in SMART_TRACKLISTS {
+        let lookups = SMART_TRACKLISTS.iter().map(|tracklist_id| async move {
             let results = self
                 .gw(
                     "deezer.pageSmartTracklist",
@@ -672,6 +675,10 @@ impl DeezerClient {
                     }),
                 )
                 .await;
+            (tracklist_id, results)
+        });
+        let mut items = Vec::new();
+        for (tracklist_id, results) in futures::future::join_all(lookups).await {
             let data = match results {
                 Ok(results) => results["DATA"].clone(),
                 Err(error) => {
@@ -885,9 +892,9 @@ impl DeezerClient {
                         .context("cannot stream the deezer track")?
                         .error_for_status()
                         .context("the deezer cdn refused the stream")?;
-                    let secret = self.inner.secret.get().copied().unwrap_or_default();
-                    let key = decrypt::track_key(&effective_id, &secret);
+                    let key = self.stream_key(&effective_id);
                     return Ok(Opened {
+                        id: effective_id,
                         response,
                         key,
                         duration,
@@ -899,6 +906,13 @@ impl DeezerClient {
             }
         }
         Err(last.context("the deezer track has no playable stream"))
+    }
+
+    /// The Blowfish key of a track, from its id and the master secret fetched at connect
+    /// time. A cached track is rekeyed the same way, without touching the network.
+    pub fn stream_key(&self, track_id: &str) -> decrypt::Secret {
+        let secret = self.inner.secret.get().copied().unwrap_or_default();
+        decrypt::track_key(track_id, &secret)
     }
 
     /// One `get_url` attempt for one format. None when the license does not cover it.

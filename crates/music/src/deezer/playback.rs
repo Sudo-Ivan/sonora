@@ -11,6 +11,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use rodio::Source as _;
 
+use crate::cache::{CachedMeta, StreamCache, Tee};
 use crate::deezer::client::DeezerClient;
 use crate::deezer::{Stream, Striped};
 use crate::engine::{self, Fetch, Loudness};
@@ -40,6 +41,7 @@ impl PlaybackFactory for Factory {
         engine::start(
             Deezer {
                 client: self.client.clone(),
+                cache: config.stream_cache.clone(),
             },
             config,
         )
@@ -48,6 +50,7 @@ impl PlaybackFactory for Factory {
 
 struct Deezer {
     client: DeezerClient,
+    cache: Option<StreamCache>,
 }
 
 #[async_trait]
@@ -60,10 +63,44 @@ impl Fetch for Deezer {
     }
 
     /// Resolves the stream url and its key together, since one answer carries both, and starts
-    /// the download decrypting as it arrives.
+    /// the download decrypting as it arrives. A cached track skips all of that: its stored
+    /// bytes are still the encrypted body, so they go back through the same decrypting
+    /// stream and not one request is made.
     async fn load(&self, id: &str) -> Result<Loaded> {
+        if let Some(hit) = self.cache.as_ref().and_then(|cache| cache.get(id)) {
+            let key = self.client.stream_key(&hit.meta.track);
+            let total = hit.bytes;
+            let meta = hit.meta.clone();
+            let stream = Stream::pulling(hit, Some(total), Striped::new(&key))
+                .primed()
+                .await?;
+            return Ok(Loaded {
+                stream,
+                duration: meta.duration(),
+                loudness: meta.loudness(),
+            });
+        }
         let opened = self.client.open_stream(id).await?;
-        let stream = Stream::open(opened.response, Striped::new(&opened.key)).await?;
+        let total = opened.response.content_length();
+        let meta = CachedMeta {
+            track: opened.id.clone(),
+            duration_secs: opened.duration.map(|d| d.as_secs_f64()),
+            lufs: opened.loudness.map(|loudness| loudness.lufs),
+            ..CachedMeta::default()
+        };
+        let store = self.cache.as_ref().and_then(|cache| cache.store(id, meta));
+        let stream = match store {
+            Some(store) => {
+                Stream::pulling(
+                    Tee::new(opened.response, store),
+                    total,
+                    Striped::new(&opened.key),
+                )
+                .primed()
+                .await?
+            }
+            None => Stream::open(opened.response, Striped::new(&opened.key)).await?,
+        };
         Ok(Loaded {
             stream,
             duration: opened.duration,

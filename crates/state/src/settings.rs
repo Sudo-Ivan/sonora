@@ -203,6 +203,9 @@ const DEFAULT_SIDEBAR_RIGHT_WIDTH: f32 = 254.;
 const DEFAULT_FONT_SIZE: f32 = 14.;
 const DEFAULT_LYRICS_SCALE: f32 = 1.;
 const DEFAULT_STARTUP: &str = "home";
+/// How much streamed audio the cache keeps by default: a gigabyte, roughly a hundred
+/// tracks.
+const DEFAULT_STREAM_CACHE_MB: u64 = 1024;
 /// "Whatever the platform uses".
 pub const SYSTEM_FONT: &str = "auto";
 
@@ -222,6 +225,8 @@ struct Held {
 struct Values {
     normalisation: bool,
     gapless: bool,
+    /// How many megabytes of streamed audio the cache may keep. Zero keeps nothing.
+    stream_cache_mb: u64,
     equalizer: bool,
     /// Per band gains in decibels, lowest band first. Kept even while `equalizer` is off, so
     /// turning it back on restores the curve.
@@ -363,6 +368,7 @@ impl Default for Values {
         Self {
             normalisation: false,
             gapless: true,
+            stream_cache_mb: DEFAULT_STREAM_CACHE_MB,
             equalizer: false,
             equalizer_bands: vec![0.; equalizer::BANDS],
             sleep_timer: false,
@@ -644,6 +650,11 @@ impl AppSettings {
 
     pub fn gapless(&self) -> bool {
         self.values.gapless
+    }
+
+    /// How many megabytes of streamed audio the cache may keep. Zero keeps nothing.
+    pub fn stream_cache_mb(&self) -> u64 {
+        self.values.stream_cache_mb
     }
 
     pub fn equalizer(&self) -> bool {
@@ -998,6 +1009,11 @@ impl AppSettings {
 
     pub fn set_gapless(&mut self, gapless: bool, cx: &mut Context<Self>) {
         self.values.gapless = gapless;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_stream_cache_mb(&mut self, mb: u64, cx: &mut Context<Self>) {
+        self.values.stream_cache_mb = mb;
         self.schedule_save(cx);
     }
 
