@@ -1181,7 +1181,7 @@ mod tests {
     fn artwork_cache_bounds() {
         let _ = profiler();
         let cx = TestAppContext::single();
-        let cache = cx.update(|cx| ArtworkCache::entity(cx));
+        let cache = cx.update(ArtworkCache::entity);
 
         let insert = |cx: &TestAppContext, cache: &Entity<ArtworkCache>, n: usize| {
             for i in 0..n {

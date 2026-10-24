@@ -228,7 +228,10 @@ async fn fetch(
         .await
         .context("cannot read the installer")?;
 
-    let sum = format!("{:x}", Sha256::digest(&bytes));
+    let sum = Sha256::digest(&bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     if sum != wanted {
         anyhow::bail!("the installer does not match its checksum");
     }
