@@ -55,7 +55,12 @@ impl Window {
     pub(crate) fn open(target: &Target) -> Result<Self> {
         let hwnd = create_window(&target.title)?;
         let browser = Rc::new(RefCell::new(None));
-        let begun = begin_environment(hwnd, &target.url, Rc::downgrade(&browser));
+        let begun = begin_environment(
+            hwnd,
+            &target.url,
+            target.script.clone(),
+            Rc::downgrade(&browser),
+        );
         if let Err(error) = begun {
             let _ = unsafe { DestroyWindow(hwnd) };
             return Err(error);
@@ -184,14 +189,19 @@ impl Drop for Window {
 }
 
 /// Starts WebView2 without pumping a nested message loop inside GPUI's click handler.
-fn begin_environment(hwnd: HWND, url: &str, browser: Weak<RefCell<Option<Browser>>>) -> Result<()> {
+fn begin_environment(
+    hwnd: HWND,
+    url: &str,
+    script: Option<String>,
+    browser: Weak<RefCell<Option<Browser>>>,
+) -> Result<()> {
     let url = url.to_string();
     let handler = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(
         move |result, environment| {
             let result = result
                 .context("WebView2 could not create an environment")
                 .and_then(|()| environment.context("WebView2 returned no environment"))
-                .and_then(|environment| begin_controller(environment, hwnd, url, browser));
+                .and_then(|environment| begin_controller(environment, hwnd, url, script, browser));
             if let Err(error) = result {
                 fail(hwnd, error);
             }
@@ -227,6 +237,7 @@ fn begin_controller(
     environment: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Environment,
     hwnd: HWND,
     url: String,
+    script: Option<String>,
     browser: Weak<RefCell<Option<Browser>>>,
 ) -> Result<()> {
     let environment = environment
@@ -244,7 +255,9 @@ fn begin_controller(
             let result = result
                 .context("WebView2 could not create a controller")
                 .and_then(|()| controller.context("WebView2 returned no controller"))
-                .and_then(|controller| finish_controller(controller, hwnd, &url, &browser));
+                .and_then(|controller| {
+                    finish_controller(controller, hwnd, &url, script.clone(), &browser)
+                });
             if let Err(error) = result {
                 fail(hwnd, error);
             }
@@ -260,6 +273,7 @@ fn finish_controller(
     controller: ICoreWebView2Controller,
     hwnd: HWND,
     url: &str,
+    script: Option<String>,
     browser: &Weak<RefCell<Option<Browser>>>,
 ) -> Result<()> {
     let Some(browser) = browser.upgrade() else {
@@ -288,6 +302,10 @@ fn finish_controller(
         .context("the installed WebView2 runtime cannot read cookies")?;
     let cookies = unsafe { view2.CookieManager() }.context("cannot open the cookie store")?;
 
+    if let Some(script) = script {
+        inject(&view, &script)?;
+    }
+
     resize(controller.clone(), hwnd);
     unsafe { controller.SetIsVisible(true) }.context("cannot show the sign-in webview")?;
     let url = wide(url);
@@ -303,6 +321,20 @@ fn finish_controller(
         cookies,
     });
     Ok(())
+}
+
+/// Hooks `script` into document creation, so it runs ahead of every page's own scripts.
+fn inject(view: &ICoreWebView2, script: &str) -> Result<()> {
+    let script = wide(script);
+    let handler =
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|result, _id| {
+            if let Err(error) = result {
+                log::warn!("webview: the page script was refused: {error}");
+            }
+            Ok(())
+        }));
+    unsafe { view.AddScriptToExecuteOnDocumentCreated(PCWSTR(script.as_ptr()), &handler) }
+        .context("cannot add the page script")
 }
 
 /// Closes an unusable host after an asynchronous setup failure.
