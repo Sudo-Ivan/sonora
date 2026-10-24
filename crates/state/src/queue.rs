@@ -503,7 +503,10 @@ impl Queue {
             track: Rc::new(hydrate(stub)),
         };
         self.past = resume.past.into_iter().map(&entry).collect();
-        self.current = resume.current.map(|stub| entry(stub));
+        self.current = resume.current.map(|stub| Entry {
+            origin: stub.from.and_then(|index| origins.get(index).cloned()),
+            track: Rc::new(hydrate(stub)),
+        });
         self.upcoming = resume.upcoming.into_iter().map(&entry).collect();
         self.manual = resume.manual.min(self.upcoming.len());
         self.similar = 0;
