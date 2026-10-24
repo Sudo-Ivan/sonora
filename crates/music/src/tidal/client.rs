@@ -16,10 +16,11 @@ use reqwest::{Method, StatusCode};
 use serde_json::{Value, json};
 use tokio::sync::RwLock;
 
+use crate::UserDetail;
 use crate::engine::Loudness;
 use crate::tidal::auth::{self, Credentials, Lane};
 use crate::tidal::manifest::Manifest;
-use crate::tidal::{lock, wire};
+use crate::tidal::{lock, lyrics, wire};
 use crate::{
     Album, AlbumCatalogue, AlbumDetail, Artist, ArtistCatalogue, ArtistProfile, Encoding, Genre,
     GenreDetail, GenreItem, GenreSection, HomeFeed, MediaKind, MusicApi, Offer, Page, Pages,
@@ -416,6 +417,137 @@ impl TidalClient {
                 path_of(url)
             );
         }
+    }
+
+    /// Who played on a track, from the OpenAPI credits relationship. Each credit names a
+    /// contributor and its role; the artist id is carried when the included resource has one.
+    /// A track with no credits answers `None` rather than an empty list, so a missing
+    /// relationship cannot blank the page.
+    pub(crate) async fn track_credits(&self, track_id: &str) -> Option<Vec<crate::Credit>> {
+        let answer = self
+            .read(
+                OPENAPI,
+                &format!(
+                    "/tracks/{}/relationships/credits",
+                    escape::component(track_id)
+                ),
+                &[("include", "credits")],
+            )
+            .await
+            .inspect_err(|error| {
+                log::info!("tidal: no credits for {track_id}: {error:#}");
+            })
+            .ok()?;
+        let credits: Vec<crate::Credit> = wire::items(&answer)
+            .iter()
+            .chain(
+                answer
+                    .get("included")
+                    .and_then(Value::as_array)
+                    .map_or([].as_slice(), Vec::as_slice),
+            )
+            .filter(|entry| wire::text(entry, "type") == Some("credits"))
+            .filter_map(|entry| {
+                let attributes = entry.get("attributes")?;
+                let name = wire::text(attributes, "name")?;
+                let role = wire::text(attributes, "role").unwrap_or("Contributor");
+                let id = entry
+                    .get("relationships")
+                    .and_then(|r| r.get("artist"))
+                    .and_then(|r| r.get("data"))
+                    .and_then(|d| wire::text(d, "id"))
+                    .map(str::to_owned)
+                    .or_else(|| wire::text(entry, "id").map(str::to_owned));
+                Some(crate::Credit {
+                    name: name.to_owned(),
+                    role: role.to_owned(),
+                    id,
+                })
+            })
+            .collect();
+        (!credits.is_empty()).then_some(credits)
+    }
+
+    /// The lyrics a track's OpenAPI relationship lists, each sheet in `included` carrying the
+    /// plain text and the synced `lrcText`. A track with no lyrics, or an api that does not
+    /// serve them to this client, falls back to the v1 lyrics endpoint the apps also use.
+    pub(crate) async fn lyrics(&self, track_id: &str) -> Result<Vec<crate::Lyrics>> {
+        if let Ok(answer) = self
+            .read(
+                OPENAPI,
+                &format!(
+                    "/tracks/{}/relationships/lyrics",
+                    escape::component(track_id)
+                ),
+                &[("include", "lyrics")],
+            )
+            .await
+            .inspect_err(|error| {
+                log::info!("tidal: openapi has no lyrics for {track_id}: {error:#}")
+            })
+        {
+            let sheets = lyrics::sheets(
+                answer
+                    .get("included")
+                    .and_then(Value::as_array)
+                    .map_or([].as_slice(), Vec::as_slice),
+            );
+            if !sheets.is_empty() {
+                return Ok(sheets);
+            }
+        }
+        let answer = self
+            .get(
+                &format!("/tracks/{}/lyrics", escape::component(track_id)),
+                &[],
+            )
+            .await?;
+        Ok(lyrics::legacy(&answer).into_iter().collect())
+    }
+
+    /// A listener's public profile: the OpenAPI user resource names them by `username` or
+    /// first and last name. Tidal lists no avatar, followers or playlist collection on the
+    /// resource, so the page answers the name alone.
+    pub(crate) async fn user_detail(&self, user_id: &str) -> Result<crate::UserDetail> {
+        let answer = self
+            .read(
+                OPENAPI,
+                &format!("/users/{}", escape::component(user_id)),
+                &[],
+            )
+            .await?;
+        let data = answer
+            .get("data")
+            .with_context(|| format!("tidal named no user {user_id}"))?;
+        let attributes = data
+            .get("attributes")
+            .context("tidal named a user without attributes")?;
+        let name = wire::text(attributes, "username")
+            .map(str::to_owned)
+            .or_else(|| {
+                match (
+                    wire::text(attributes, "firstName"),
+                    wire::text(attributes, "lastName"),
+                ) {
+                    (None, None) => None,
+                    (first, last) => Some(
+                        [first, last]
+                            .into_iter()
+                            .flatten()
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    ),
+                }
+            })
+            .context("tidal named an unnamed user")?;
+        Ok(crate::UserDetail {
+            id: wire::text(data, "id").unwrap_or(user_id).to_owned(),
+            name,
+            avatar: None,
+            followers: None,
+            following: None,
+            playlists: Vec::new(),
+        })
     }
 
     async fn get(&self, path: &str, query: &[(&str, &str)]) -> Result<Value> {
@@ -1114,7 +1246,18 @@ impl MusicApi for TidalClient {
         let answer = self
             .get(&format!("/tracks/{}", escape::component(track_id)), &[])
             .await?;
-        wire::track(&answer).with_context(|| format!("cannot read the tidal track {track_id}"))
+        let mut track = wire::track(&answer)
+            .with_context(|| format!("cannot read the tidal track {track_id}"))?;
+        // The track detail page shows who played on it; the credits relationship is one call,
+        // only made here since a list of tracks never pays it.
+        if let Some(credits) = self.track_credits(track_id).await {
+            track.credits = credits;
+        }
+        Ok(track)
+    }
+
+    async fn user(&self, user_id: &str) -> Result<UserDetail> {
+        self.user_detail(user_id).await
     }
 
     async fn track_playcount(&self, _track_id: &str) -> Result<Option<u64>> {

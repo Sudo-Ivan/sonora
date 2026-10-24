@@ -121,7 +121,7 @@ fn local_library_scan() {
             }
             _ => {}
         }
-        let scanned = music::local::scan::scan(&[root.clone()], &root, &index);
+        let scanned = music::local::scan::scan(std::slice::from_ref(&root), &root, &index);
         seen = seen.max(scanned.tracks.len());
         drop(scanned);
     });

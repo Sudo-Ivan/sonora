@@ -34,6 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Tidal tracks show their credits, Tidal joins the lyrics providers, and a playlist
+  owner's profile page opens on Tidal.
 - Bound the Deezer artist portrait cache so a long session stops growing it.
 
 - A Deezer artist page no longer lists other artists' releases: the discography comes

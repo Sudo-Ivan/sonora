@@ -134,6 +134,7 @@ fn main() {
         let lyrics: Vec<Arc<dyn LyricsProvider>> = vec![
             Arc::new(music::local::LocalLyrics),
             Arc::new(music::subsonic::SubsonicLyrics::new()),
+            Arc::new(music::tidal::TidalLyrics::new()),
             Arc::new(music::binimum::Binimum::new()),
             Arc::new(music::musixmatch::Musixmatch::new()),
             Arc::new(music::lrclib::LrcLib::new()),

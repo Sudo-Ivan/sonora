@@ -9,6 +9,7 @@
 mod auth;
 mod client;
 mod links;
+mod lyrics;
 mod manifest;
 mod playback;
 mod wire;
@@ -26,6 +27,10 @@ use crate::{
 };
 
 pub use client::TidalClient;
+pub use lyrics::TidalLyrics;
+
+pub(crate) const NAME: &str = "Tidal";
+pub(crate) const SLUG: &str = "tidal";
 
 /// Tidal as the app sees it before an account is chosen: how to sign in, and the session a
 /// sign-in or a stored one opens.
@@ -103,11 +108,11 @@ impl Default for TidalProvider {
 #[async_trait]
 impl MusicProvider for TidalProvider {
     fn name(&self) -> &'static str {
-        "Tidal"
+        NAME
     }
 
     fn slug(&self) -> &'static str {
-        "tidal"
+        SLUG
     }
 
     fn link(&self, link: &str) -> Option<crate::link::Linked> {
