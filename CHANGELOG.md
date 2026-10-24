@@ -15,9 +15,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   playback, lyrics and track credits.
 - Offline mode plays downloads and the local library with no connection, and downloads
   report their progress with toasts.
-- Albums and artists in the library load faster with progressive progress reporting, and
-  the player bar can steer playback between devices.
-
 - Streamed tracks are cached on disk so they replay instantly without downloading again,
   for Deezer and Subsonic. Deezer tracks stay encrypted exactly as they arrive, so nothing
   readable is ever stored. The cache size is a setting, from off to 4 GB, with the least
