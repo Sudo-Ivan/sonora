@@ -7,13 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-24
+
 ### Added
+
+- Tidal is available from the sign-in page: library, playlists, mixes, radio, hi-res FLAC
+  playback, lyrics and track credits.
+- Offline mode plays downloads and the local library with no connection, and downloads
+  report their progress with toasts.
+- Albums and artists in the library load faster with progressive progress reporting, and
+  the player bar can steer playback between devices.
 
 - Streamed tracks are cached on disk so they replay instantly without downloading again,
   for Deezer and Subsonic. Deezer tracks stay encrypted exactly as they arrive, so nothing
   readable is ever stored. The cache size is a setting, from off to 4 GB, with the least
   recently played tracks evicted first.
 - Deezer's home mixes now load in parallel instead of one after another.
+
+### Changed
+
+- Synced with upstream 0.44.1 and updated bundled libraries.
+
+### Fixed
+
+- The memory watchdog trims the heap and sheds file pages again on every tick.
+- Bound the Deezer artist portrait cache so a long session stops growing it.
+- Tidal tracks show their credits and a playlist owner's profile page opens on Tidal.
 
 ## [0.42.16] - 2026-10-12
 
@@ -33,10 +52,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Search now folds the local library into its results alongside the streaming provider.
 
 ### Fixed
-
-- Tidal tracks show their credits, Tidal joins the lyrics providers, and a playlist
-  owner's profile page opens on Tidal.
-- Bound the Deezer artist portrait cache so a long session stops growing it.
 
 - A Deezer artist page no longer lists other artists' releases: the discography comes
   from the artist-specific endpoint, and the albums rail shows only the artist's own
