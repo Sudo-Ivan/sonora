@@ -8,6 +8,7 @@ license.workspace = true
 bundled-sqlite = ["rusqlite/bundled", "storage/bundled-sqlite"]
 
 [dependencies]
+moka = { workspace = true, features = ["sync"] }
 anyhow.workspace = true
 ardftsrc.workspace = true
 async-trait.workspace = true

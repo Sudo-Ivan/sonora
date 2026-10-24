@@ -34,6 +34,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Bound the Deezer artist portrait cache so a long session stops growing it.
+
 - A Deezer artist page no longer lists other artists' releases: the discography comes
   from the artist-specific endpoint, and the albums rail shows only the artist's own
   releases.

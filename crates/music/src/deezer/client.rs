@@ -60,6 +60,8 @@ const LIBRARY_PAGE: u32 = 2000;
 
 /// How many releases an artist page asks for. Deezer answers this many in one page, and even
 const PORTRAIT_LIMIT: usize = 24;
+/// How many artist portraits the client remembers at once.
+const PORTRAITS: u64 = 4096;
 /// How many related artists lend their albums to a thin rail, and how many albums each
 /// lends.
 const SIMILAR_ARTISTS: usize = 6;
@@ -147,8 +149,9 @@ struct Inner {
     /// `PACE`, and a refusal pushes it out by the backoff, so every caller waits it out.
     slot: Mutex<Instant>,
     /// Artist portraits already looked up, so a search that ranks the same artists on
-    /// every keystroke does not spend the quota on them again.
-    portraits: Mutex<HashMap<String, String>>,
+    /// every keystroke does not spend the quota on them again. Bounded: the least used
+    /// entries leave first, so a long session does not grow it forever.
+    portraits: moka::sync::Cache<String, String>,
 }
 
 /// A track's audio as it starts to arrive, with the key that decrypts it and what the gateway
@@ -215,7 +218,7 @@ impl DeezerClient {
                 }),
                 secret: OnceLock::new(),
                 slot: Mutex::new(Instant::now()),
-                portraits: Mutex::new(HashMap::new()),
+                portraits: moka::sync::Cache::new(PORTRAITS),
             }),
         };
         Ok(client)
@@ -1131,7 +1134,7 @@ impl MusicApi for DeezerClient {
         let mut images = HashMap::new();
         let mut missing = Vec::new();
         {
-            let known = lock(&self.inner.portraits);
+            let known = &self.inner.portraits;
             for id in ids.into_iter().take(PORTRAIT_LIMIT) {
                 match known.get(&id) {
                     Some(cover) => {
@@ -1155,7 +1158,7 @@ impl MusicApi for DeezerClient {
             else {
                 continue;
             };
-            lock(&self.inner.portraits).insert(id.clone(), cover.clone());
+            self.inner.portraits.insert(id.clone(), cover.clone());
             images.insert(id, cover);
         }
         Ok(images)
