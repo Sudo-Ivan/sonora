@@ -106,6 +106,6 @@ not listed below is inherited from upstream.
 
 ## Still upstream
 
-The library fork under `github.com/sonorahq` (`gpui`) stays pinned
-dependencies: upstream maintains them for this code base and they carry changes its
-own projects depend on. The `librespot` fork is gone with the Spotify provider.
+The library fork at `github.com/Sudo-Ivan/gpui` stays pinned dependencies: it
+carries upstream's rev plus a one commit dispatcher cap for this fork, and upstream
+maintains the rest of them for this code base. The `librespot` fork is gone with the Spotify provider.

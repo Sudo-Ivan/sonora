@@ -40,8 +40,8 @@ fastrand = "2.5"
 futures = "0.3"
 gethostname = "1.1"
 fluent-bundle = "0.16"
-gpui = { git = "https://github.com/Sudo-Ivan/gpui", rev = "7eea897d4765f59dc9dac1ca468a91e84bb518a6" }
-gpui_platform = { git = "https://github.com/Sudo-Ivan/gpui", rev = "7eea897d4765f59dc9dac1ca468a91e84bb518a6", features = [
+gpui = { git = "https://github.com/Sudo-Ivan/gpui", rev = "48051c266fc2013a3f0f7f08601eb813fe7cd9be" }
+gpui_platform = { git = "https://github.com/Sudo-Ivan/gpui", rev = "48051c266fc2013a3f0f7f08601eb813fe7cd9be", features = [
   "font-kit",
   "wayland",
   "x11",
