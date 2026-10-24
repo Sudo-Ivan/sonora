@@ -334,16 +334,16 @@ impl ToastStack {
     }
 
     fn card(&self, slot: &Slot, now: Instant, cx: &mut Context<Self>) -> Toast {
-        let toast = &slot.toast;
-        let id = toast.id;
+        let entry = &slot.toast;
+        let id = entry.id;
         let mut args = i18n::FluentArgs::new();
-        if let Some(name) = &toast.name {
+        if let Some(name) = &entry.name {
             args.set("name", i18n::Value::value(name.as_ref()));
         }
-        if let Some(count) = toast.count {
+        if let Some(count) = entry.count {
             args.set("count", i18n::Value::value(count));
         }
-        let message = i18n::lookup(&toast.key, Some(&args));
+        let message = i18n::lookup(&entry.key, Some(&args));
         let swiped = self.swipe.as_ref().filter(|swipe| swipe.id == id);
         let (sway, drop) = match swiped {
             Some(swipe) => (swipe.offset.x / px(1.), swipe.offset.y / px(1.)),
@@ -351,7 +351,7 @@ impl ToastStack {
         };
         let scale = slot.scale.now(now).max(0.01);
 
-        let card = Toast::new(("toast", id), message)
+        let card = Toast::new(("entry", id), message)
             .absolute()
             .left_0()
             .right_0()
@@ -366,29 +366,29 @@ impl ToastStack {
             .when(sway != 0. || drop != 0., |card| {
                 card.layer_translate(point(px(sway), px(drop)))
             })
-            .when_some(toast.name.clone(), Toast::strong)
-            .when(toast.single_line, Toast::single_line)
+            .when_some(entry.name.clone(), Toast::strong)
+            .when(entry.single_line, Toast::single_line)
             .when_some(
-                toast
+                entry
                     .detail
                     .clone()
-                    .or_else(|| toast.note.as_ref().map(|key| i18n::lookup(key, None))),
+                    .or_else(|| entry.note.as_ref().map(|key| i18n::lookup(key, None))),
                 Toast::detail,
             )
             .when(
-                toast
+                entry
                     .action
                     .as_ref()
                     .is_some_and(|action| action.target.is_some()),
                 |card| card.action_icon("icons/external-link.svg"),
             )
-            .map(|card| match toast.outcome {
+            .map(|card| match entry.outcome {
                 Outcome::Plain => card,
                 Outcome::Done => card.icon("icons/circle-check.svg"),
                 Outcome::Info => card.icon("icons/info.svg"),
                 Outcome::Warning => card.icon("icons/triangle-alert.svg"),
                 Outcome::Failed => card.icon("icons/octagon-x.svg"),
-                Outcome::Loading => match toast.progress {
+                Outcome::Loading => match entry.progress {
                     Some(done) => card.progress(done),
                     None => card.loading(),
                 },
@@ -407,16 +407,16 @@ impl ToastStack {
                 }
             });
 
-        // A leaving or covered toast keeps every button so its text does not reflow, but lets
-        // every press through to the toast in front.
+        // A leaving or covered entry keeps every button so its text does not reflow, but lets
+        // every press through to the entry in front.
         if slot.leaving.is_some() || !slot.active {
             return card
                 .inert()
                 .on_dismiss(|_, _, _| {})
-                .when_some(toast.cancel.clone(), |card, cancel| {
+                .when_some(entry.cancel.clone(), |card, cancel| {
                     card.cancel(i18n::lookup(&cancel.key, None), |_, _, _| {})
                 })
-                .when_some(toast.action.clone(), |card, action| {
+                .when_some(entry.action.clone(), |card, action| {
                     card.action(i18n::lookup(&action.key, None), |_, _, _| {})
                 });
         }
@@ -431,10 +431,10 @@ impl ToastStack {
                 }),
             )
             .on_dismiss(move |_, _, cx| Toasts::discard(id, cx))
-            .when_some(toast.target.clone().map(destination), |card, dest| {
+            .when_some(entry.target.clone().map(destination), |card, dest| {
                 card.on_open(move |_, cx| navigate(dest.clone(), cx))
             });
-        let card = match toast.cancel.clone() {
+        let card = match entry.cancel.clone() {
             Some(cancel) => {
                 let toasts = toasts.clone();
                 card.cancel(i18n::lookup(&cancel.key, None), move |_, _, cx| {
@@ -444,7 +444,7 @@ impl ToastStack {
             }
             None => card,
         };
-        match toast.action.clone() {
+        match entry.action.clone() {
             Some(action) => card.action(i18n::lookup(&action.key, None), move |_, _, cx| {
                 action.run(cx);
                 if let Some(target) = action.target.clone() {

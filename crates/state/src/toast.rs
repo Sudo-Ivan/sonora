@@ -322,11 +322,11 @@ impl Toasts {
     pub fn progress(id: usize, done: f32, cx: &mut App) {
         let toasts = Self::entity(cx);
         toasts.update(cx, |this, cx| {
-            let Some(toast) = this.shown.iter_mut().find(|shown| shown.id == id) else {
+            let Some(entry) = this.shown.iter_mut().find(|shown| shown.id == id) else {
                 return;
             };
-            if toast.progress != Some(done) {
-                toast.progress = Some(done);
+            if entry.progress != Some(done) {
+                entry.progress = Some(done);
                 cx.notify();
             }
         });
