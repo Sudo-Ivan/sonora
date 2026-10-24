@@ -58,6 +58,7 @@ cpal = { workspace = true, features = ["pulseaudio"] }
 pulseaudio.workspace = true
 
 [dev-dependencies]
+dhat.workspace = true
 env_logger.workspace = true
 proptest.workspace = true
 rustls.workspace = true

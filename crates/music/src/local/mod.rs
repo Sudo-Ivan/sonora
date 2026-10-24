@@ -1,10 +1,10 @@
-mod client;
+pub mod client;
 mod id3;
-mod index;
+pub mod index;
 mod lyrics;
 mod playback;
-mod scan;
-mod store;
+pub mod scan;
+pub mod store;
 mod tags;
 mod wire;
 

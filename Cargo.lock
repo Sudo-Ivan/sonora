@@ -3987,6 +3987,7 @@ dependencies = [
  "cbc",
  "cpal",
  "deunicode",
+ "dhat",
  "dirs",
  "env_logger",
  "fastrand",
@@ -6590,6 +6591,7 @@ dependencies = [
  "anyhow",
  "ashpd",
  "async-trait",
+ "dhat",
  "dirs",
  "embed",
  "fastrand",
@@ -7494,6 +7496,7 @@ name = "ui"
 version = "0.44.1"
 dependencies = [
  "ashpd",
+ "dhat",
  "futures",
  "gpui",
  "gpui_platform",

@@ -21,7 +21,7 @@ pub mod progress;
 pub mod scrobble;
 mod sink;
 mod spectrum;
-mod stream;
+pub mod stream;
 pub mod subsonic;
 pub mod tidal;
 pub mod tls;
