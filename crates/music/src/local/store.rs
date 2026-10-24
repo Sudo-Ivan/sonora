@@ -308,8 +308,10 @@ mod tests {
 
     /// An isolated database per test, since the schema lives behind the real one.
     fn scratch(name: &str) -> Store {
-        let path = std::env::temp_dir().join(format!("{name}.sqlite"));
-        let _ = std::fs::remove_file(&path);
+        let path = std::env::temp_dir()
+            .join(format!("{name}-{}", std::process::id()))
+            .join("state.sqlite");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         Store::new(storage::Database::at(path))
     }
 
