@@ -4,7 +4,6 @@
 //! to the post-warmup baseline; growth past the tolerance is a leak.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
