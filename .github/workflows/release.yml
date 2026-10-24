@@ -723,6 +723,7 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" \
             -f tag_name="$TAG" --jq .body > notes.md
           printf '\n[Provenance](%s#provenance)\n' "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" >> notes.md
+          printf '\n[Code signing policy](https://github.com/%s#code-signing-policy)\n' "$GITHUB_REPOSITORY" >> notes.md
 
       # The release is created as a draft with every asset already on it, then published.
       # Once published, immutable releases lock the tag and its assets for good.

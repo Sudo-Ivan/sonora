@@ -1,3 +1,4 @@
+use crate::shared::device_code::device_code;
 use crate::shared::local;
 use crate::shared::popups::CookiePrompt;
 use gpui::prelude::*;
@@ -359,27 +360,7 @@ impl LoginView {
                     .text_color(theme.muted_foreground)
                     .child(t!("login-device-code", url = &url)),
             )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(
-                        div()
-                            .text_size(theme.text(Text::Title))
-                            .font_weight(FontWeight::BOLD)
-                            .child(SharedString::from(code.clone())),
-                    )
-                    .child(
-                        Button::new("copy-code")
-                            .icon("icons/copy.svg")
-                            .ghost()
-                            .small()
-                            .on_click(move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
-                            }),
-                    ),
-            )
+            .child(device_code(code, cx))
     }
 
     fn url_prompt(&self, url: String) -> impl IntoElement {
@@ -449,7 +430,12 @@ impl LoginView {
 }
 
 impl Render for LoginView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))] window: &mut Window,
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))] _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let state = self.session.read(cx).state().clone();
         let pending = self.session.read(cx).is_pending();
         let providers: Vec<state::ProviderInfo> = self.session.read(cx).providers().collect();
@@ -516,7 +502,7 @@ impl Render for LoginView {
         let theme = *cx.theme();
 
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        let radius = crate::chrome::window_radius(Sonora::global(cx).settings.read(cx), cx);
+        let radius = crate::chrome::window_radius(Sonora::global(cx).settings.read(cx), cx, window);
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
         let radius: Option<Pixels> = None;
 

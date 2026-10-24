@@ -1,6 +1,9 @@
+use std::sync::OnceLock;
+
 use gpui::prelude::*;
 use gpui::{
-    App, Div, MouseButton, Pixels, StyleRefinement, Window, WindowControlArea, div, px, svg,
+    App, Div, Font, MouseButton, Pixels, StyleRefinement, Window, WindowControlArea, div, font, px,
+    svg,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use gpui::{CursorStyle, Decorations, ResizeEdge};
@@ -10,6 +13,11 @@ use crate::theme::ActiveTheme as _;
 const SYSTEM_ACTS: bool = cfg!(target_os = "windows");
 const BUTTON: Pixels = px(20.);
 const GLYPH: Pixels = px(16.);
+const CAPTION_GLYPH: Pixels = px(10.);
+const CAPTION_NUDGE: Pixels = px(1.);
+/// The icon fonts that carry Windows' caption glyphs, newest first. Windows 11 ships both, and
+/// Windows 10 only the second.
+const CAPTION_FONTS: [&str; 2] = ["Segoe Fluent Icons", "Segoe MDL2 Assets"];
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 const RESIZE_EDGE: Pixels = px(5.);
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -30,6 +38,15 @@ impl Control {
             Self::Maximize => "icons/window-maximize.svg",
             Self::Restore => "icons/window-restore.svg",
             Self::Close => "icons/window-close.svg",
+        }
+    }
+
+    fn caption_glyph(self) -> &'static str {
+        match self {
+            Self::Minimize => "\u{E921}",
+            Self::Maximize => "\u{E922}",
+            Self::Restore => "\u{E923}",
+            Self::Close => "\u{E8BB}",
         }
     }
 
@@ -151,23 +168,24 @@ impl RenderOnce for WindowControls {
         let theme = *cx.theme();
         let overrides = std::mem::take(self.base.style());
 
-        let mut wanted: Vec<Control> = [
+        let mut wanted = [
             supported.minimize.then_some(Control::Minimize),
             supported.maximize.then_some(match maximized {
                 true => Control::Restore,
                 false => Control::Maximize,
             }),
             Some(Control::Close),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        ];
 
         if self.leading {
             wanted.reverse();
         }
 
         let is_windows = cfg!(target_os = "windows");
+        let caption = match is_windows {
+            true => caption_font(cx),
+            false => None,
+        };
         let mut controls = self
             .base
             .flex()
@@ -181,7 +199,7 @@ impl RenderOnce for WindowControls {
             .when(!SYSTEM_ACTS, |this| {
                 this.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             })
-            .children(wanted.into_iter().map(move |control| {
+            .children(wanted.into_iter().flatten().map(move |control| {
                 let danger = control == Control::Close;
 
                 div()
@@ -212,20 +230,38 @@ impl RenderOnce for WindowControls {
                             })
                         })
                     })
-                    .child(
-                        svg()
-                            .path(icons::path(control.icon()))
-                            .id("glyph")
-                            .size(GLYPH)
-                            .flex_none()
-                            .text_color(theme.muted_foreground)
-                            .group_hover(control.id(), move |style| {
-                                style.text_color(match danger {
-                                    true => theme.danger_foreground,
-                                    false => theme.foreground,
+                    .map(|this| match caption.clone() {
+                        Some(caption) => this.child(
+                            div()
+                                .font(caption)
+                                .text_size(CAPTION_GLYPH)
+                                .line_height(CAPTION_GLYPH)
+                                .relative()
+                                .top(CAPTION_NUDGE)
+                                .text_color(theme.muted_foreground)
+                                .group_hover(control.id(), move |style| {
+                                    style.text_color(match danger {
+                                        true => theme.danger_foreground,
+                                        false => theme.foreground,
+                                    })
                                 })
-                            }),
-                    )
+                                .child(control.caption_glyph()),
+                        ),
+                        None => this.child(
+                            svg()
+                                .path(icons::path(control.icon()))
+                                .id("glyph")
+                                .size(GLYPH)
+                                .flex_none()
+                                .text_color(theme.muted_foreground)
+                                .group_hover(control.id(), move |style| {
+                                    style.text_color(match danger {
+                                        true => theme.danger_foreground,
+                                        false => theme.foreground,
+                                    })
+                                }),
+                        ),
+                    })
                     .when(!control.system(), |this| {
                         this.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(move |_, window, cx| {
@@ -241,6 +277,26 @@ impl RenderOnce for WindowControls {
         controls.style().refine(&overrides);
         controls
     }
+}
+
+/// The first caption icon font installed on this system, or `None` when there is neither and the
+/// controls draw their SVG icons. GPUI reads a font's fallbacks only once the font itself loads,
+/// so each family is looked up by name. The answer is kept for the rest of the run.
+fn caption_font(cx: &App) -> Option<Font> {
+    static FAMILY: OnceLock<Option<&'static str>> = OnceLock::new();
+    let family = FAMILY.get_or_init(|| {
+        let installed = cx.text_system().all_font_names();
+        let found = CAPTION_FONTS.into_iter().find(|family| {
+            installed
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(family))
+        });
+        if found.is_none() {
+            log::warn!("controls: no caption icon font is installed, drawing the icons instead");
+        }
+        found
+    });
+    family.map(font)
 }
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]

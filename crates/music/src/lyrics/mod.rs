@@ -3,6 +3,7 @@ pub mod lrc;
 pub(crate) mod romanize;
 mod shape;
 pub(crate) mod sheet;
+pub(crate) mod ttml;
 
 use std::collections::HashSet;
 use std::time::Duration;
@@ -24,22 +25,51 @@ const TRUNCATED: u32 = 500;
 const TRUSTED: u32 = 25;
 
 pub fn rank(query: &LyricsQuery, hits: Vec<LyricsHit>) -> Vec<LyricsHit> {
-    let mut scored: Vec<(i64, LyricsHit)> = hits
+    rank_with_priority(query, hits, &[])
+}
+
+/// Ranks hits best first and removes duplicates. Word-by-word beats line-synced, which beats
+/// plain or cut-short lyrics. Within one of those kinds the source earlier in `priority` wins,
+/// and the match score settles the rest. Sources missing from `priority` come after the rest.
+pub fn rank_with_priority(
+    query: &LyricsQuery,
+    hits: Vec<LyricsHit>,
+    priority: &[String],
+) -> Vec<LyricsHit> {
+    let position = |source: &str| {
+        priority
+            .iter()
+            .position(|name| name == source)
+            .unwrap_or(priority.len())
+    };
+    let mut scored: Vec<(u8, usize, i64, LyricsHit)> = hits
         .into_iter()
         .filter(|hit| eligible(query, hit))
-        .map(|hit| (score(query, &hit), hit))
+        .map(|hit| {
+            (
+                grade(query, &hit.lyrics),
+                position(hit.source),
+                score(query, &hit),
+                hit,
+            )
+        })
         .collect();
-    scored.sort_by(|(left_score, left), (right_score, right)| {
-        right_score
-            .cmp(left_score)
-            .then_with(|| left.source.cmp(right.source))
-            .then_with(|| left.title.cmp(&right.title))
-    });
+    scored.sort_by(
+        |(left_grade, left_place, left_score, left),
+         (right_grade, right_place, right_score, right)| {
+            right_grade
+                .cmp(left_grade)
+                .then_with(|| left_place.cmp(right_place))
+                .then_with(|| right_score.cmp(left_score))
+                .then_with(|| left.source.cmp(right.source))
+                .then_with(|| left.title.cmp(&right.title))
+        },
+    );
 
     let mut seen = HashSet::new();
     scored
         .into_iter()
-        .map(|(_, hit)| hit)
+        .map(|(_, _, _, hit)| hit)
         .filter(|hit| seen.insert(fingerprint(&hit.lyrics)))
         .collect()
 }
@@ -80,7 +110,9 @@ pub fn instrumental(query: &LyricsQuery, hits: &[LyricsHit]) -> bool {
     matching().any(|hit| hit.instrumental) && !matching().any(|hit| !hit.lyrics.is_empty())
 }
 
-fn matched(query: &LyricsQuery, hit: &LyricsHit) -> bool {
+/// Whether a hit is for the queried track at all: the same title and artist, and a length close
+/// enough when both are known. Ranking and the instrumental check never look at any other hit.
+pub fn matched(query: &LyricsQuery, hit: &LyricsHit) -> bool {
     if !alike(&hit.title, &query.title) || !artists_alike(&hit.artist, &query.artist) {
         return false;
     }
@@ -121,6 +153,21 @@ pub fn score(query: &LyricsQuery, hit: &LyricsHit) -> i64 {
         score -= i64::from(TRUNCATED);
     }
     score
+}
+
+/// What kind of lyrics a sheet is, for ranking: 3 word-by-word, 2 line-synced, 1 plain. A sheet
+/// that ends well before the track does counts as 0 whatever its timing.
+fn grade(query: &LyricsQuery, lyrics: &Lyrics) -> u8 {
+    match (
+        truncated(lyrics, query.duration),
+        lyrics.worded(),
+        lyrics.synced(),
+    ) {
+        (true, _, _) => 0,
+        (false, true, _) => 3,
+        (false, false, true) => 2,
+        (false, false, false) => 1,
+    }
 }
 
 fn truncated(lyrics: &Lyrics, duration: Duration) -> bool {
@@ -168,29 +215,43 @@ fn stretched_shout(text: &str) -> bool {
     uppercase && !lowercase && longest >= 3
 }
 
+/// What two sheets share when they are the same lyrics: their letters and digits, lowercased,
+/// behind what kind of sheet they are. It is written into one buffer sized for the whole sheet.
 fn fingerprint(lyrics: &Lyrics) -> String {
-    let trim = |text: &str| {
-        text.chars()
-            .filter(|letter| letter.is_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect::<String>()
+    let trim = |print: &mut String, text: &str| {
+        print.extend(
+            text.chars()
+                .filter(|letter| letter.is_alphanumeric())
+                .flat_map(char::to_lowercase),
+        );
     };
     match lyrics {
-        Lyrics::Plain { text, .. } => format!("plain:{}", trim(text)),
+        Lyrics::Plain { text, .. } => {
+            let mut print = String::with_capacity(text.len() + 6);
+            print.push_str("plain:");
+            trim(&mut print, text);
+            print
+        }
         Lyrics::Synced { lines } => {
             let worded = lines.iter().any(LyricsLine::worded);
-            let text: String = lines
-                .iter()
-                .flat_map(|line| {
+            let texts = || {
+                lines.iter().flat_map(|line| {
                     std::iter::once(line.text.as_str()).chain(
                         line.secondary
                             .iter()
                             .map(|secondary| secondary.text.as_str()),
                     )
                 })
-                .map(trim)
-                .collect();
-            format!("synced:{worded}:{text}")
+            };
+            let mut print = String::with_capacity(texts().map(str::len).sum::<usize>() + 13);
+            print.push_str(match worded {
+                true => "synced:true:",
+                false => "synced:false:",
+            });
+            for text in texts() {
+                trim(&mut print, text);
+            }
+            print
         }
     }
 }

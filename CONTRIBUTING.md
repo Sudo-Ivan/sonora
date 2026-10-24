@@ -4,18 +4,24 @@ Sonora is a native music streaming client, built with Rust and
 [GPUI](https://github.com/zed-industries/zed). Linux is the platform we mainly
 develop against. Windows and macOS are built by CI but usually not exercised locally except for
 platform-specific features.
+Before you build a feature, read the [vision](https://sonorahq.org/docs/vision) and the
+[roadmap](https://sonorahq.org/docs/roadmap). When unsure, please open an issue first.
+We hate closing pull requests for changes that don't align with the vision as much as
+you do.
 
-## Setup
+## Building
 
-With Nix, everything you need is in the dev shell:
+Use Nix where available. The dev shell has everything:
 
 ```sh
 nix develop          # or: direnv allow
 cargo run --locked --package sonora
 ```
 
-Without Nix, install the build and runtime dependencies yourself. The authoritative list is
-`runtimeLibraries` plus `nativeBuildInputs` in `flake.nix`; these commands are that list translated.
+Without Nix you need [rustup](https://rustup.rs), which picks up `rust-toolchain.toml`, plus a
+C++ compiler, `cmake`, `pkg-config`, `mold`, and the development packages for ALSA, D-Bus,
+fontconfig, libxkbcommon, libxcb, libX11 and SQLite. Running it also needs a Vulkan driver. Install
+those from your package manager.
 
 Arch and derivatives:
 
@@ -164,9 +170,22 @@ English is the source of truth and must carry every key. Other locales may lag: 
 back to English at runtime, so a partial translation is a fine contribution - don't machine-translate
 a language you don't speak just to fill the table. The tests only check that English is complete and
 that no locale invents a key.
+Run `cargo fmt`, `cargo test --workspace` and `cargo clippy --workspace --all-targets` before you
+open a pull request.
 
-The coverage table in [README.md](README.md#translations) shows where each locale stands; strings
-live in `assets/i18n/<locale>/main.ftl`.
+## Pull requests
+
+Open them against `dev`. Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
+with no body, and any major user-facing changes should be mentioned under `## [Unreleased]` in
+`CHANGELOG.md`.
+
+## Translations
+
+English must be present for every key. Other locales can lag behind, since a missing key falls back to English.
+It's okay to machine-translate a language you don't speak. Run `scripts/i18n-coverage.py` afterwards to refresh
+the table in the README.
+
+## AI
 
 ```sh
 $EDITOR assets/i18n/uk/main.ftl        # fill in what it lacks
@@ -196,8 +215,11 @@ Don't hand-edit these, re-run the generator:
 sentences to `## [Unreleased]` as features land, under `Added` / `Changed` / `Fixed` - say what
 someone using Sonora can now do, and leave out work no user can observe. Cutting a release is then
 only a rename.
+Use whatever tools you like, but you must understand, review and test what you submit. PR descriptions,
+issues and replies in discussions must be your own words. A generated summary of a small change is fine,
+and so is AI proofreading or translation of text you wrote. Pull requests that ignore this may be closed
+without comment.
 
 ## License
 
-Sonora is GPL-3.0-or-later. By contributing you agree that your contribution is licensed under those
-terms.
+Sonora is GPL-3.0-or-later, and your contributions are licensed under the same terms.

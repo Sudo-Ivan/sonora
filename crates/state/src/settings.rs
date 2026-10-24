@@ -5,8 +5,16 @@
 //! `state.sqlite` as [`StateValues`]. [`AppSettings`] holds both and saves each on its own
 //! debounce, so a sidebar drag never rewrites the preferences file.
 
+mod equalizer;
+mod themes;
+
+pub use self::equalizer::equalizer_profile_label;
+pub use self::themes::{ThemeFamily, ThemeVariant};
+
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -17,10 +25,9 @@ use gpui::{
     App, Bounds, Context, DisplayId, EventEmitter, Pixels, Size, Subscription, Task, Window,
     WindowBounds, point, px, size,
 };
-use music::WritingSystem;
-use music::equalizer::{self, Gains};
 use music::lyrics::LOCAL;
 use music::scrobble::Account;
+use music::{Codec, Quality, Transcode, WritingSystem};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -29,6 +36,8 @@ use ui::{
     Layout, Look, Mode, Pace, Pin, Rounding, Saver, Sorting, Stillness, ThemeKind, ThemeOverrides,
 };
 
+use self::equalizer::Profile;
+use crate::equalizer::DeviceRule;
 use crate::pins::PinSort;
 use crate::queue::{Resume, gap_target};
 use crate::{Outcome, Repeat, Sonora, Toasts};
@@ -196,18 +205,24 @@ const RELOAD_DELAY: Duration = Duration::from_millis(150);
 const RELOAD_RETRY_DELAY: Duration = Duration::from_secs(1);
 const RELOAD_RETRIES: usize = 3;
 const THEMES_DIRECTORY: &str = "themes";
-const THEME_FORMAT_VERSION: u32 = 1;
 const DEFAULT_VOLUME: f32 = 0.7;
 const DEFAULT_SIDEBAR_WIDTH: f32 = 195.;
 const DEFAULT_SIDEBAR_RIGHT_WIDTH: f32 = 254.;
 const DEFAULT_FONT_SIZE: f32 = 14.;
 const DEFAULT_LYRICS_SCALE: f32 = 1.;
 const DEFAULT_STARTUP: &str = "home";
-/// How much streamed audio the cache keeps by default: a gigabyte, roughly a hundred
-/// tracks.
-const DEFAULT_STREAM_CACHE_MB: u64 = 1024;
 /// "Whatever the platform uses".
 pub const SYSTEM_FONT: &str = "auto";
+/// Every lyrics source Sonora knows by the name its provider reports, in the order a fresh
+/// install prefers them.
+pub const LYRICS_SOURCES: [&str; 6] = [
+    LOCAL,
+    "Subsonic",
+    "Musixmatch",
+    "LrcLib",
+    "Kugou",
+    "NetEase",
+];
 
 /// A pin together with the provider it belongs to. The pin is flattened so the stored JSON
 /// reads as a pin with one extra `slug` key.
@@ -225,19 +240,70 @@ struct Held {
 struct Values {
     normalisation: bool,
     gapless: bool,
-    /// How many megabytes of streamed audio the cache may keep. Zero keeps nothing.
-    stream_cache_mb: u64,
+    /// Whether played tracks are kept, sealed, so playing one again downloads nothing.
+    keep_tracks: bool,
+    /// How many gigabytes the cache of played tracks may take. Downloads do not count.
+    cache_gb: u32,
+    /// Whether the listener put Sonora offline, so it shows and plays only what was downloaded
+    /// until they go online again.
+    offline_mode: bool,
     equalizer: bool,
-    /// Per band gains in decibels, lowest band first. Kept even while `equalizer` is off, so
-    /// turning it back on restores the curve.
+    /// The ten band gains an older Sonora saved. Read once to seed the profiles when there are
+    /// none, never written back, and read leniently like the keys that replaced it.
+    #[serde(skip_serializing, deserialize_with = "equalizer::read_gains")]
     equalizer_bands: Vec<f32>,
-    sleep_timer: bool,
+    /// The stored curves, kept even while `equalizer` is off. `equalizer_profile` picks the one
+    /// that plays. Both read leniently, so a hand-edited mistake never makes the file unreadable.
+    #[serde(deserialize_with = "equalizer::Profile::read_all")]
+    equalizer_profiles: Vec<Profile>,
+    #[serde(deserialize_with = "equalizer::read_index")]
+    equalizer_profile: usize,
+    /// Which sound plays once the sound moves to a device, one rule per device, read leniently
+    /// like the profiles.
+    #[serde(
+        deserialize_with = "equalizer::read_rules",
+        serialize_with = "equalizer::write_rules"
+    )]
+    equalizer_rules: Vec<DeviceRule>,
+    /// Whether the equalizer screen shows its advanced controls, off so a first look shows only
+    /// the switch, the curve and the presets.
+    equalizer_advanced: bool,
+    /// The bass and treble shelves laid over whichever sound plays, in decibels, read leniently
+    /// like the profiles.
+    #[serde(deserialize_with = "equalizer::read_tone")]
+    equalizer_bass: f64,
+    #[serde(deserialize_with = "equalizer::read_tone")]
+    equalizer_treble: f64,
     lyrics_for_local_files: bool,
-    prefer_local_lyrics: bool,
+    /// The output device to play on, as a cpal device id, or `None` to follow the system's
+    /// default. Kept while the device is gone, so playback returns to it, and cleared once it is
+    /// there but will not open.
+    output_device: Option<String>,
+    /// The sample rate to open the output device at, in hertz, or `None` for the rate it runs
+    /// at. A device that does not offer it opens at its own.
+    output_rate: Option<u32>,
+    /// The buffer to ask the output device for, in frames, or `None` for Sonora's own. A device
+    /// that does not allow it gets the nearest it does.
+    output_buffer: Option<u32>,
+    /// The format a Subsonic server is asked to convert tracks into, by its Subsonic name, or
+    /// `None` to take what the server sends.
+    subsonic_format: Option<String>,
+    /// The highest bitrate a Subsonic server is asked to send, in kilobits per second, or `None`
+    /// for no ceiling.
+    subsonic_bitrate: Option<u32>,
+    /// The stream level asked of a streaming service, by its settings name. A service that does
+    /// not serve it plays the nearest one it does.
+    stream_quality: String,
     /// Set once Local has been added to a list saved before it existed, so a user who turns it
     /// off afterwards is not given it back.
     local_lyrics_offered: bool,
+    /// Set once Subsonic has been added to a list saved before it existed, so a user who turns it
+    /// off afterwards is not given it back.
+    subsonic_lyrics_offered: bool,
     lyrics_providers: Vec<String>,
+    /// Every known lyrics source, the preferred one first. Lyrics of the same kind from two
+    /// sources go to the one listed higher.
+    lyrics_provider_priority: Vec<String>,
     karaoke_lyrics: bool,
     blur_lyrics: bool,
     romanized_lyrics: bool,
@@ -257,9 +323,51 @@ struct Values {
     local_folders: Vec<PathBuf>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     hidden_nav: Vec<String>,
+    /// Missing system requirements the user asked never to hear about again.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    silenced_requirements: Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     scrobbling: BTreeMap<String, Account>,
     appearance: Appearance,
+}
+
+/// The arrangement of the workspace's player bar, independent of its surface material.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PlayerBarLayout {
+    #[default]
+    Classic,
+    Centered,
+    Compact,
+}
+
+impl PlayerBarLayout {
+    pub const ALL: [Self; 3] = [Self::Classic, Self::Centered, Self::Compact];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Classic => "classic",
+            Self::Centered => "centered",
+            Self::Compact => "compact",
+        }
+    }
+
+    /// The label's Fluent key, resolved by the view when it renders the layout cards.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Classic => "settings-player-bar-classic",
+            Self::Centered => "settings-player-bar-centered",
+            Self::Compact => "settings-player-bar-compact",
+        }
+    }
+
+    /// Reads a saved layout id, keeping the original bar for missing or unknown choices.
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "centered" => Self::Centered,
+            "compact" => Self::Compact,
+            _ => Self::Classic,
+        }
+    }
 }
 
 /// The `appearance` block of `settings.json`. Fixed choices are stored by id, removed variant
@@ -275,6 +383,8 @@ struct Appearance {
     visualizer_style: String,
     /// Whether the visualizer draws the track at its own level rather than at the volume.
     visualizer_absolute: bool,
+    player_bar_layout: String,
+    player_bar_transparent: bool,
     icons: String,
     rounding: String,
     /// Whether the app paints its frosted treatments. The key kept its old name, which stood
@@ -288,9 +398,15 @@ struct Appearance {
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     server_side_decorations: bool,
     /// The window's own corner rounding, independent of `rounding` (the UI element radius).
-    /// On Windows this maps onto DWM's two fixed presets; on Linux/FreeBSD it only has an
-    /// effect with client-side decorations, since server-side ones are the compositor's call.
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    /// On Windows this maps onto DWM's two fixed presets and on macOS onto the toolbar styles
+    /// AppKit sizes its corners by. On Linux/FreeBSD it only has an effect with client-side
+    /// decorations, since server-side ones are the compositor's call.
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "macos"
+    ))]
     window_rounding: String,
     window_controls: bool,
     #[cfg(not(target_os = "macos"))]
@@ -302,28 +418,6 @@ struct Appearance {
     theme_overrides: ThemeOverrides,
     fullscreen_controls_autohide: String,
     os_fullscreen: bool,
-}
-
-/// A valid custom theme, identified by its filename stem.
-#[derive(Clone, Debug, PartialEq)]
-struct CustomTheme {
-    id: String,
-    name: String,
-    theme: ThemeOverrides,
-}
-
-/// A theme scan result and whether transient I/O failures merit another scan.
-struct LoadedThemes {
-    themes: Vec<CustomTheme>,
-    retry: bool,
-}
-
-#[derive(Deserialize)]
-struct ThemeFile {
-    name: String,
-    author: String,
-    version: u32,
-    theme: ThemeOverrides,
 }
 
 /// Which watched sources may have changed in one filesystem event.
@@ -357,10 +451,11 @@ enum SettingsReload {
     Retry,
 }
 
-/// Whether a settings save should be tried again after a transient failure.
+/// Whether a settings save should be tried again after a transient failure, which carries the
+/// error so the last attempt can show it.
 enum SettingsSave {
     Complete,
-    Retry,
+    Retry(String),
 }
 
 impl Default for Values {
@@ -368,14 +463,32 @@ impl Default for Values {
         Self {
             normalisation: false,
             gapless: true,
-            stream_cache_mb: DEFAULT_STREAM_CACHE_MB,
+            keep_tracks: true,
+            offline_mode: false,
+            cache_gb: crate::vault::CACHE_GB,
             equalizer: false,
-            equalizer_bands: vec![0.; equalizer::BANDS],
-            sleep_timer: false,
+            equalizer_bands: Vec::new(),
+            equalizer_profiles: Vec::new(),
+            equalizer_profile: 0,
+            equalizer_rules: Vec::new(),
+            equalizer_advanced: false,
+            equalizer_bass: 0.,
+            equalizer_treble: 0.,
             lyrics_for_local_files: true,
-            prefer_local_lyrics: false,
+            output_device: None,
+            output_rate: None,
+            output_buffer: None,
+            subsonic_format: None,
+            subsonic_bitrate: None,
+            stream_quality: Quality::default().id().to_owned(),
             local_lyrics_offered: false,
-            lyrics_providers: [LOCAL, "Musixmatch", "LrcLib"].map(str::to_owned).to_vec(),
+            subsonic_lyrics_offered: false,
+            lyrics_provider_priority: lyrics_priority(&[]),
+            // NetEase, the last one, starts switched off.
+            lyrics_providers: LYRICS_SOURCES[..5]
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
             karaoke_lyrics: true,
             blur_lyrics: true,
             romanized_lyrics: true,
@@ -392,9 +505,18 @@ impl Default for Values {
             startup: DEFAULT_STARTUP.to_owned(),
             local_folders: Vec::new(),
             hidden_nav: Vec::new(),
+            silenced_requirements: Vec::new(),
             scrobbling: BTreeMap::new(),
             appearance: Appearance::default(),
         }
+    }
+}
+
+impl Values {
+    /// The values as they are used, with whatever a hand edit or an older Sonora left settled.
+    fn settled(mut self) -> Self {
+        self.settle_equalizer();
+        self
     }
 }
 
@@ -435,6 +557,8 @@ struct StateValues {
     resume: Option<Resume>,
     window: Option<Frame>,
     system_theme: String,
+    /// The variant last chosen in each theme family, by family id.
+    theme_variants: HashMap<String, String>,
 }
 
 impl Default for StateValues {
@@ -464,35 +588,53 @@ impl Default for StateValues {
             resume: None,
             window: None,
             system_theme: ThemeKind::Dark.id().to_owned(),
+            theme_variants: HashMap::new(),
         }
     }
 }
 
 /// The `runtime` row of the `app_state` table: one JSON blob, replaced whole on every save.
-#[derive(Clone)]
+/// Every call goes through one kept connection, because playback saves every few seconds and
+/// opening the database again parses its whole schema each time.
 struct StateStore {
     database: Database,
+    connection: RefCell<Option<rusqlite::Connection>>,
 }
 
 impl StateStore {
     fn new(database: Database) -> Self {
-        Self { database }
+        Self {
+            database,
+            connection: RefCell::new(None),
+        }
     }
 
-    fn open(&self) -> Result<rusqlite::Connection> {
-        self.database.open()
+    /// Runs `work` on the kept connection, opening one when there is none. A failure drops the
+    /// connection, so the next call starts from a fresh one.
+    fn with<T>(&self, work: impl FnOnce(&rusqlite::Connection) -> Result<T>) -> Result<T> {
+        let mut kept = self.connection.borrow_mut();
+        let connection = match kept.take() {
+            Some(connection) => connection,
+            None => self.database.open()?,
+        };
+        let done = work(&connection);
+        if done.is_ok() {
+            *kept = Some(connection);
+        }
+        done
     }
 
     fn load(&self) -> Result<Option<StateValues>> {
-        let encoded: Option<String> = self
-            .open()?
-            .query_row(
-                "SELECT value FROM app_state WHERE key = 'runtime'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("cannot read app state")?;
+        let encoded: Option<String> = self.with(|connection| {
+            connection
+                .query_row(
+                    "SELECT value FROM app_state WHERE key = 'runtime'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .context("cannot read app state")
+        })?;
         encoded
             .map(|encoded| serde_json::from_str(&encoded).context("cannot decode app state"))
             .transpose()
@@ -500,13 +642,15 @@ impl StateStore {
 
     fn save(&self, state: &StateValues) -> Result<()> {
         let encoded = serde_json::to_string(state).context("cannot encode app state")?;
-        self.open()?
-            .execute(
-                "INSERT INTO app_state (key, value) VALUES ('runtime', ?)
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![encoded],
-            )
-            .context("cannot save app state")?;
+        self.with(|connection| {
+            connection
+                .execute(
+                    "INSERT INTO app_state (key, value) VALUES ('runtime', ?)
+                     ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    params![encoded],
+                )
+                .context("cannot save app state")
+        })?;
         Ok(())
     }
 }
@@ -515,12 +659,14 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             theme: "dark".to_owned(),
-            adaptive_theme: true,
+            adaptive_theme: false,
             ambient: true,
             ambient_motion: true,
             visualizer: true,
             visualizer_style: ui::VisualizerStyle::default().id().to_owned(),
             visualizer_absolute: false,
+            player_bar_layout: PlayerBarLayout::default().id().to_owned(),
+            player_bar_transparent: true,
             icons: icons::BASE.to_owned(),
             rounding: Rounding::Rounded.id().to_owned(),
             blur: true,
@@ -530,8 +676,12 @@ impl Default for Appearance {
             transparency: ui::BACKDROP_TRANSPARENCY,
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             server_side_decorations: true,
-            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+            #[cfg(target_os = "windows")]
+            window_rounding: Rounding::Rounded.id().to_owned(),
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             window_rounding: Rounding::Square.id().to_owned(),
+            #[cfg(target_os = "macos")]
+            window_rounding: Rounding::Subtle.id().to_owned(),
             window_controls: true,
             #[cfg(not(target_os = "macos"))]
             traffic_light_controls: false,
@@ -547,12 +697,15 @@ impl Default for Appearance {
 }
 
 /// Preferences from `settings.json` and runtime state from `state.sqlite`, each saved on its own
-/// debounce. `broken` prevents an invalid JSON file from being overwritten with defaults.
+/// debounce. `broken` protects nonempty invalid JSON from being overwritten with defaults.
 pub struct AppSettings {
     values: Values,
     state: StateValues,
     path: PathBuf,
-    themes: Vec<CustomTheme>,
+    /// The theme files in the user's themes folder.
+    themes: Vec<ThemeVariant>,
+    /// The bundled themes and `themes`, grouped the way the Appearance page lists them.
+    families: Vec<ThemeFamily>,
     store: StateStore,
     save: Option<Task<()>>,
     save_state: Option<Task<()>>,
@@ -566,6 +719,9 @@ pub struct AppSettings {
     /// The watch on the config folder. Dropping it ends the watch.
     watcher: Option<RecommendedWatcher>,
     reload: Option<Task<()>>,
+    /// Set once a save gives up after its retries, so the failure toast shows once until a
+    /// save lands again.
+    failing: bool,
 }
 
 /// Emitted after settings reload or the selected custom palette changes.
@@ -591,13 +747,25 @@ impl AppSettings {
             }
         };
         let parsed = bytes.map(|bytes| (serde_json::from_slice::<Values>(json(&bytes)), bytes));
+        let parsed = parsed.map(|(values, bytes)| (values.map(offer_subsonic_lyrics), bytes));
         let (values, writable, disk, broken) = match parsed {
-            Some((Ok(values), bytes)) => (values, writable, Some(bytes), None),
+            Some((Ok(values), bytes)) => (values.settled(), writable, Some(bytes), None),
+            Some((Err(_), bytes)) if empty_settings(&bytes) => {
+                (Values::default().settled(), writable, Some(bytes), None)
+            }
             Some((Err(error), _)) => {
                 log::warn!("settings: cannot parse {}: {error}", path.display());
-                (Values::default(), false, None, Some(error.line()))
+                (Values::default().settled(), false, None, Some(error.line()))
             }
-            None => (Values::default(), writable, None, None),
+            // The default provider list already has Subsonic, so a fresh install marks it offered
+            // and a user who turns it off does not get it back on the next launch.
+            None => {
+                let values = Values {
+                    subsonic_lyrics_offered: true,
+                    ..Values::default()
+                };
+                (values.settled(), writable, None, None)
+            }
         };
 
         let state = match store.load() {
@@ -608,13 +776,16 @@ impl AppSettings {
                 StateValues::default()
             }
         };
-        let themes = load_themes(&themes_path(&path), &[]).themes;
+        themes::adopt_legacy(&values.appearance.theme, &themes_path(&path));
+        let themes = themes::load(&themes_path(&path), &[]).themes;
+        let families = themes::catalog(&themes);
 
         Self {
             values,
             state,
             path,
             themes,
+            families,
             store,
             save: None,
             save_state: None,
@@ -624,6 +795,7 @@ impl AppSettings {
             broken,
             watcher: None,
             reload: None,
+            failing: false,
         }
     }
 
@@ -652,37 +824,83 @@ impl AppSettings {
         self.values.gapless
     }
 
-    /// How many megabytes of streamed audio the cache may keep. Zero keeps nothing.
-    pub fn stream_cache_mb(&self) -> u64 {
-        self.values.stream_cache_mb
+    /// Whether tracks that played are kept in the cache.
+    pub fn keep_tracks(&self) -> bool {
+        self.values.keep_tracks
     }
 
-    pub fn equalizer(&self) -> bool {
-        self.values.equalizer
+    /// The cache limit in gigabytes, held within the setting's bounds whatever a hand-edited
+    /// settings file says.
+    pub fn cache_gb(&self) -> u32 {
+        let (low, high) = crate::vault::CACHE_GB_RANGE;
+        self.values.cache_gb.clamp(low, high)
     }
 
-    /// The stored curve, padded flat or cut to the band count and clamped into range, so a file
-    /// written by another version still loads.
-    pub fn equalizer_gains(&self) -> Gains {
-        let stored = &self.values.equalizer_bands;
-        let gains = std::array::from_fn(|band| stored.get(band).copied().unwrap_or(0.));
-        equalizer::clamped(&gains)
-    }
-
-    pub fn sleep_timer(&self) -> bool {
-        self.values.sleep_timer
+    pub fn offline_mode(&self) -> bool {
+        self.values.offline_mode
     }
 
     pub fn lyrics_for_local_files(&self) -> bool {
         self.values.lyrics_for_local_files
     }
 
-    pub fn prefer_local_lyrics(&self) -> bool {
-        self.values.prefer_local_lyrics
+    pub fn output_device(&self) -> Option<&str> {
+        self.values.output_device.as_deref()
+    }
+
+    pub fn output_rate(&self) -> Option<u32> {
+        self.values.output_rate
+    }
+
+    pub fn output_buffer(&self) -> Option<u32> {
+        self.values.output_buffer
+    }
+
+    /// How a Subsonic server is asked to convert tracks. A format this build does not know reads
+    /// as none.
+    pub fn transcode(&self) -> Transcode {
+        Transcode {
+            codec: self
+                .values
+                .subsonic_format
+                .as_deref()
+                .and_then(Codec::from_id),
+            bitrate: self.values.subsonic_bitrate,
+        }
+    }
+
+    /// The stream level asked of a streaming service. A level this build does not know reads as
+    /// the best.
+    pub fn quality(&self) -> Quality {
+        Quality::from_id(&self.values.stream_quality).unwrap_or_default()
     }
 
     pub fn lyrics_providers(&self) -> &[String] {
         &self.values.lyrics_providers
+    }
+
+    /// Every known lyrics source, the preferred one first, disabled ones included.
+    pub fn lyrics_provider_priority(&self) -> Vec<String> {
+        lyrics_priority(&self.values.lyrics_provider_priority)
+    }
+
+    /// The enabled lyrics sources, the preferred one first.
+    pub fn enabled_lyrics_provider_priority(&self) -> Vec<String> {
+        self.lyrics_provider_priority()
+            .into_iter()
+            .filter(|name| self.lyrics_provider_enabled(name))
+            .collect()
+    }
+
+    /// Moves an enabled source into `gap`, counted between the enabled sources from 0 before the
+    /// first to their count after the last. Disabled sources keep their place.
+    pub fn place_lyrics_provider(&mut self, provider: &str, gap: usize, cx: &mut Context<Self>) {
+        let mut order = self.lyrics_provider_priority();
+        if !place_lyrics_provider(&mut order, &self.values.lyrics_providers, provider, gap) {
+            return;
+        }
+        self.values.lyrics_provider_priority = order;
+        self.schedule_save(cx);
     }
 
     pub fn lyrics_provider_enabled(&self, provider: &str) -> bool {
@@ -822,15 +1040,59 @@ impl AppSettings {
         &self.values.appearance.theme
     }
 
-    /// Yields custom theme identifiers with their display names.
-    pub fn custom_themes(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.themes
-            .iter()
-            .map(|theme| (theme.id.as_str(), theme.name.as_str()))
+    /// Every theme file, bundled first and then the user's, grouped into families. The built-in
+    /// System, Dark and Light themes are not in it and stay in `ThemeKind::ALL`.
+    pub fn theme_families(&self) -> &[ThemeFamily] {
+        &self.families
+    }
+
+    /// The family and variant of the selected theme, or `None` while a built-in theme is
+    /// selected or the selected file is gone.
+    pub fn theme_variant(&self) -> Option<(&ThemeFamily, &ThemeVariant)> {
+        self.families.iter().find_map(|family| {
+            family
+                .variant(self.theme())
+                .map(|variant| (family, variant))
+        })
+    }
+
+    /// The variant choosing `family` would select: the one last chosen in it, else the first
+    /// whose lightness matches the system appearance, else the first.
+    pub fn family_variant(&self, family: &str, cx: &App) -> Option<&ThemeVariant> {
+        let family = self.families.iter().find(|found| found.id == family)?;
+        let light = ThemeKind::System.resolved(cx) == ThemeKind::Light;
+        self.state
+            .theme_variants
+            .get(&family.id)
+            .and_then(|id| family.variant(id))
+            .or_else(|| {
+                family
+                    .variants
+                    .iter()
+                    .find(|variant| variant.is_light() == light)
+            })
+            .or(family.variants.first())
     }
 
     pub fn adaptive_theme(&self) -> bool {
         self.values.appearance.adaptive_theme
+    }
+
+    /// The arrangement of the workspace's playback controls. Unknown saved ids use Classic.
+    pub fn player_bar_layout(&self) -> PlayerBarLayout {
+        PlayerBarLayout::from_id(&self.values.appearance.player_bar_layout)
+    }
+
+    /// Whether the listener asked for a see-through player bar. What the bar does is
+    /// `player_bar_translucent`, which also needs the blur.
+    pub fn player_bar_transparent(&self) -> bool {
+        self.values.appearance.player_bar_transparent
+    }
+
+    /// Whether the player bar is drawn see-through with pages scrolling under it. It takes Blur
+    /// UI as well, since without the blur the bar's text would sit on the bare page.
+    pub fn player_bar_translucent(&self) -> bool {
+        self.player_bar_transparent() && self.blur()
     }
 
     /// Whether fullscreen paints the ambient background sampled from the cover.
@@ -934,7 +1196,12 @@ impl AppSettings {
         }
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "macos"
+    ))]
     pub fn window_rounding(&self) -> Rounding {
         Rounding::from_id(&self.values.appearance.window_rounding)
     }
@@ -973,10 +1240,8 @@ impl AppSettings {
     /// Combines the selected theme file with legacy overrides from `settings.json`.
     pub fn theme_overrides(&self) -> ThemeOverrides {
         let inline = &self.values.appearance.theme_overrides;
-        self.themes
-            .iter()
-            .find(|theme| theme.id == self.theme())
-            .map(|theme| theme.theme.clone().merged(inline))
+        self.theme_variant()
+            .map(|(_, variant)| variant.overrides.clone().merged(inline))
             .unwrap_or_else(|| inline.clone())
     }
 
@@ -1012,23 +1277,18 @@ impl AppSettings {
         self.schedule_save(cx);
     }
 
-    pub fn set_stream_cache_mb(&mut self, mb: u64, cx: &mut Context<Self>) {
-        self.values.stream_cache_mb = mb;
+    pub fn set_keep_tracks(&mut self, keep_tracks: bool, cx: &mut Context<Self>) {
+        self.values.keep_tracks = keep_tracks;
         self.schedule_save(cx);
     }
 
-    pub fn set_equalizer(&mut self, on: bool, cx: &mut Context<Self>) {
-        self.values.equalizer = on;
+    pub fn set_offline_mode(&mut self, offline_mode: bool, cx: &mut Context<Self>) {
+        self.values.offline_mode = offline_mode;
         self.schedule_save(cx);
     }
 
-    pub fn set_equalizer_gains(&mut self, gains: &Gains, cx: &mut Context<Self>) {
-        self.values.equalizer_bands = equalizer::clamped(gains).to_vec();
-        self.schedule_save(cx);
-    }
-
-    pub fn set_sleep_timer(&mut self, sleep_timer: bool, cx: &mut Context<Self>) {
-        self.values.sleep_timer = sleep_timer;
+    pub fn set_cache_gb(&mut self, cache_gb: u32, cx: &mut Context<Self>) {
+        self.values.cache_gb = cache_gb;
         self.schedule_save(cx);
     }
 
@@ -1046,8 +1306,29 @@ impl AppSettings {
         self.schedule_save(cx);
     }
 
-    pub fn set_prefer_local_lyrics(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        self.values.prefer_local_lyrics = enabled;
+    pub fn set_output_device(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        self.values.output_device = id;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_output_rate(&mut self, rate: Option<u32>, cx: &mut Context<Self>) {
+        self.values.output_rate = rate;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_output_buffer(&mut self, frames: Option<u32>, cx: &mut Context<Self>) {
+        self.values.output_buffer = frames;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_transcode(&mut self, transcode: Transcode, cx: &mut Context<Self>) {
+        self.values.subsonic_format = transcode.codec.map(|codec| codec.id().to_owned());
+        self.values.subsonic_bitrate = transcode.bitrate;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_quality(&mut self, quality: Quality, cx: &mut Context<Self>) {
+        self.values.stream_quality = quality.id().to_owned();
         self.schedule_save(cx);
     }
 
@@ -1411,6 +1692,21 @@ impl AppSettings {
         self.schedule_save(cx);
     }
 
+    pub fn requirement_silenced(&self, slug: &str) -> bool {
+        self.values
+            .silenced_requirements
+            .iter()
+            .any(|silenced| silenced == slug)
+    }
+
+    pub fn silence_requirement(&mut self, slug: &str, cx: &mut Context<Self>) {
+        if self.requirement_silenced(slug) {
+            return;
+        }
+        self.values.silenced_requirements.push(slug.to_owned());
+        self.schedule_save(cx);
+    }
+
     pub fn set_startup(&mut self, screen: impl Into<String>, cx: &mut Context<Self>) {
         let screen = screen.into();
         if self.values.startup == screen {
@@ -1429,9 +1725,31 @@ impl AppSettings {
         self.schedule_state_save(cx);
     }
 
+    /// Selects a built-in theme by its `ThemeKind` id or a theme file by its variant id, and
+    /// remembers a variant as the one its family opens on next time.
     pub fn set_theme(&mut self, theme: impl Into<String>, cx: &mut Context<Self>) {
         self.values.appearance.theme = theme.into();
+        if let Some(family) = self.theme_variant().map(|(family, _)| family.id.clone())
+            && self.state.theme_variants.get(&family) != Some(&self.values.appearance.theme)
+        {
+            let variant = self.values.appearance.theme.clone();
+            self.state.theme_variants.insert(family, variant);
+            self.schedule_state_save(cx);
+        }
         self.schedule_save(cx);
+    }
+
+    /// Selects the variant `family_variant` picks for `family`. Returns false and changes
+    /// nothing when there is no such family.
+    pub fn set_theme_family(&mut self, family: &str, cx: &mut Context<Self>) -> bool {
+        let Some(variant) = self
+            .family_variant(family, cx)
+            .map(|variant| variant.id.clone())
+        else {
+            return false;
+        };
+        self.set_theme(variant, cx);
+        true
     }
 
     pub fn set_adaptive_theme(&mut self, adaptive: bool, cx: &mut Context<Self>) {
@@ -1441,6 +1759,18 @@ impl AppSettings {
 
     pub fn set_ambient(&mut self, ambient: bool, cx: &mut Context<Self>) {
         self.values.appearance.ambient = ambient;
+        self.schedule_save(cx);
+    }
+
+    /// Applies a player bar layout immediately and saves it in the appearance preferences.
+    pub fn set_player_bar_layout(&mut self, layout: PlayerBarLayout, cx: &mut Context<Self>) {
+        self.values.appearance.player_bar_layout = layout.id().to_owned();
+        self.schedule_save(cx);
+    }
+
+    /// Lets the page scroll under the player bar, or restores the solid bar below the page.
+    pub fn set_player_bar_transparent(&mut self, transparent: bool, cx: &mut Context<Self>) {
+        self.values.appearance.player_bar_transparent = transparent;
         self.schedule_save(cx);
     }
 
@@ -1535,7 +1865,12 @@ impl AppSettings {
         self.schedule_save(cx);
     }
 
-    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    #[cfg(any(
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "freebsd",
+        target_os = "macos"
+    ))]
     pub fn set_window_rounding(&mut self, rounding: Rounding, cx: &mut Context<Self>) {
         self.values.appearance.window_rounding = rounding.id().to_owned();
         self.schedule_save(cx);
@@ -1560,6 +1895,10 @@ impl AppSettings {
     pub fn set_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
         self.values.appearance.font_size = size.clamp(ui::MIN_FONT, ui::MAX_FONT);
         self.schedule_save(cx);
+    }
+
+    pub fn reset_font_size(&mut self, cx: &mut Context<Self>) {
+        self.set_font_size(DEFAULT_FONT_SIZE, cx);
     }
 
     pub fn set_transparent(&mut self, transparent: bool, cx: &mut Context<Self>) {
@@ -1600,10 +1939,14 @@ impl AppSettings {
         self.save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SAVE_DELAY).await;
             for attempt in 0..=SAVE_RETRIES {
-                let Ok(result) = this.update(cx, |this, _| this.save_now()) else {
+                let Ok(result) = this.update(cx, |this, cx| this.save_now(cx)) else {
                     break;
                 };
-                if !matches!(result, SettingsSave::Retry) || attempt == SAVE_RETRIES {
+                let SettingsSave::Retry(error) = result else {
+                    break;
+                };
+                if attempt == SAVE_RETRIES {
+                    this.update(cx, |this, cx| this.give_up(error, cx)).ok();
                     break;
                 }
                 cx.background_executor().timer(SAVE_RETRY_DELAY).await;
@@ -1631,8 +1974,23 @@ impl AppSettings {
         }
     }
 
-    /// Writes `settings.json` now, or logs why it cannot.
-    fn save_now(&mut self) -> SettingsSave {
+    /// Tells the user that `settings.json` could not be written, once per run of failed saves.
+    fn give_up(&mut self, error: String, cx: &mut App) {
+        if std::mem::replace(&mut self.failing, true) {
+            return;
+        }
+        Toasts::with_detail(
+            Outcome::Failed,
+            "toast-settings-save-failed",
+            None,
+            error,
+            cx,
+        );
+    }
+
+    /// Writes `settings.json` now, or logs why it cannot. A save skipped because another
+    /// program changed the file warns the user when the reload that follows drops their change.
+    fn save_now(&mut self, cx: &mut App) -> SettingsSave {
         if !self.writable {
             return SettingsSave::Complete;
         }
@@ -1641,7 +1999,7 @@ impl AppSettings {
         };
         if let Err(error) = fs::create_dir_all(parent) {
             log::error!("settings: cannot create {}: {error}", parent.display());
-            return SettingsSave::Retry;
+            return SettingsSave::Retry(error.to_string());
         }
 
         let bytes = match serde_json::to_vec_pretty(&self.values) {
@@ -1656,7 +2014,7 @@ impl AppSettings {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
             Err(error) => {
                 log::warn!("settings: cannot read {}: {error}", self.path.display());
-                return SettingsSave::Retry;
+                return SettingsSave::Retry(error.to_string());
             }
         };
         if current != self.disk {
@@ -1664,13 +2022,20 @@ impl AppSettings {
                 "settings: not saving {}, file changed on disk",
                 self.path.display()
             );
+            if current
+                .as_deref()
+                .is_some_and(|current| overrides(current, &bytes))
+            {
+                Toasts::show(Outcome::Warning, "toast-settings-overwritten", cx);
+            }
             return SettingsSave::Complete;
         }
-        if let Err(error) = fs::write(&self.path, &bytes) {
-            log::error!("settings: cannot write {}: {error}", self.path.display());
-            return SettingsSave::Retry;
+        if let Err(error) = save_settings(&self.path, &bytes, current.as_deref()) {
+            log::error!("settings: cannot write {}: {error:#}", self.path.display());
+            return SettingsSave::Retry(format!("{error:#}"));
         }
         self.disk = Some(bytes);
+        self.failing = false;
         SettingsSave::Complete
     }
 
@@ -1804,9 +2169,10 @@ impl AppSettings {
     fn reload_files(&mut self, changed: FileChanges, cx: &mut Context<Self>) -> FileChanges {
         let previous_theme = self.theme_overrides();
         let (themes_changed, themes_retry) = if changed.themes {
-            let loaded = load_themes(&themes_path(&self.path), &self.themes);
+            let loaded = themes::load(&themes_path(&self.path), &self.themes);
             let different = loaded.themes != self.themes;
             if different {
+                self.families = themes::catalog(&loaded.themes);
                 self.themes = loaded.themes;
             }
             (different, loaded.retry)
@@ -1830,7 +2196,8 @@ impl AppSettings {
         }
     }
 
-    /// Accepts a valid external settings write and protects a broken file from app saves.
+    /// Accepts valid external settings, treats an empty file like a deletion, and protects
+    /// nonempty broken files from app saves.
     fn reload_settings(&mut self, cx: &mut Context<Self>) -> SettingsReload {
         let bytes = match fs::read(&self.path) {
             Ok(bytes) => bytes,
@@ -1854,8 +2221,14 @@ impl AppSettings {
             self.broken = None;
             return SettingsReload::Unchanged;
         }
+        if empty_settings(&bytes) {
+            self.disk = Some(bytes);
+            self.writable = true;
+            self.broken = None;
+            return SettingsReload::Unchanged;
+        }
         let values = match serde_json::from_slice::<Values>(json(&bytes)) {
-            Ok(values) => values,
+            Ok(values) => offer_subsonic_lyrics(values).settled(),
             Err(error) => {
                 log::warn!("settings: cannot parse {}: {error}", self.path.display());
                 let newly_broken = self.broken != Some(error.line());
@@ -1870,6 +2243,7 @@ impl AppSettings {
         };
 
         log::info!("settings: reloaded {}", self.path.display());
+        themes::adopt_legacy(&values.appearance.theme, &themes_path(&self.path));
         let previous = std::mem::replace(&mut self.values, values);
         self.disk = Some(bytes);
         self.writable = true;
@@ -1916,125 +2290,13 @@ pub fn remember_window(window: &mut Window, cx: &mut App) {
     settings.update(cx, |settings, cx| settings.watch_window(window, cx));
 }
 
-/// Loads every valid direct JSON child, retaining a previous value during a broken write.
-fn load_themes(directory: &Path, previous: &[CustomTheme]) -> LoadedThemes {
-    match fs::symlink_metadata(directory) {
-        Ok(metadata) if metadata.file_type().is_dir() => {}
-        Ok(_) => {
-            log::warn!(
-                "settings: themes path is not a directory: {}",
-                directory.display()
-            );
-            return LoadedThemes {
-                themes: previous.to_vec(),
-                retry: false,
-            };
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return LoadedThemes {
-                themes: Vec::new(),
-                retry: false,
-            };
-        }
-        Err(error) => {
-            log::warn!("settings: cannot inspect {}: {error}", directory.display());
-            return LoadedThemes {
-                themes: previous.to_vec(),
-                retry: true,
-            };
-        }
-    }
-    let entries = match fs::read_dir(directory) {
-        Ok(entries) => entries,
-        Err(error) => {
-            log::warn!("settings: cannot read {}: {error}", directory.display());
-            return LoadedThemes {
-                themes: previous.to_vec(),
-                retry: true,
-            };
-        }
-    };
-    let mut paths = Vec::new();
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                log::warn!(
-                    "settings: cannot read an entry in {}: {error}",
-                    directory.display()
-                );
-                return LoadedThemes {
-                    themes: previous.to_vec(),
-                    retry: true,
-                };
-            }
-        };
-        let path = entry.path();
-        if !path
-            .extension()
-            .is_some_and(|extension| extension == "json")
-        {
-            continue;
-        }
-        let kind = match entry.file_type() {
-            Ok(kind) => kind,
-            Err(error) => {
-                log::warn!("settings: cannot inspect {}: {error}", path.display());
-                return LoadedThemes {
-                    themes: previous.to_vec(),
-                    retry: true,
-                };
-            }
-        };
-        if kind.is_file() {
-            paths.push(path);
-        }
-    }
-    paths.sort();
-
-    let mut themes = Vec::new();
-    let mut retry = false;
-    for path in paths {
-        let Some(id) = path.file_stem().and_then(|stem| stem.to_str()) else {
-            log::warn!("settings: theme filename is not UTF-8: {}", path.display());
-            continue;
-        };
-        if ThemeKind::ALL.into_iter().any(|kind| kind.id() == id) {
-            log::warn!(
-                "settings: theme {} uses a reserved identifier",
-                path.display()
-            );
-            continue;
-        }
-
-        let bytes = match fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                log::warn!("settings: cannot read theme {}: {error}", path.display());
-                retry = true;
-                if let Some(theme) = previous.iter().find(|theme| theme.id == id) {
-                    themes.push(theme.clone());
-                }
-                continue;
-            }
-        };
-        match parse_theme(&bytes, &path, id) {
-            Ok(theme) => themes.push(theme),
-            Err(error) => {
-                log::warn!("settings: cannot load theme {}: {error:#}", path.display());
-                if let Some(theme) = previous.iter().find(|theme| theme.id == id) {
-                    themes.push(theme.clone());
-                }
-            }
-        }
-    }
-    themes.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    LoadedThemes { themes, retry }
+/// Whether reloading `current` from disk would replace the values that serialize to `ours`. A
+/// file that does not parse is left to the broken-file toast, since the reload keeps our values.
+fn overrides(current: &[u8], ours: &[u8]) -> bool {
+    serde_json::from_slice::<Values>(json(current))
+        .ok()
+        .and_then(|theirs| serde_json::to_vec_pretty(&theirs).ok())
+        .is_some_and(|theirs| theirs != ours)
 }
 
 /// The JSON in a file without the UTF-8 byte order mark that Notepad and PowerShell can put in
@@ -2043,47 +2305,24 @@ fn json(bytes: &[u8]) -> &[u8] {
     bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
 }
 
-/// Parses one theme file and assigns the identifier derived from its path.
-fn parse_theme(bytes: &[u8], path: &Path, id: &str) -> Result<CustomTheme> {
-    let value: serde_json::Value = serde_json::from_slice(json(bytes))
-        .with_context(|| format!("cannot parse {}", path.display()))?;
-    let object = value
-        .as_object()
-        .context("theme file must contain an object")?;
-    for field in object.keys() {
-        anyhow::ensure!(
-            matches!(field.as_str(), "name" | "author" | "version" | "theme"),
-            "unknown theme file field `{field}`"
-        );
+/// Whether a file contains no settings to protect, allowing a later preference change to save.
+fn empty_settings(bytes: &[u8]) -> bool {
+    json(bytes).iter().all(u8::is_ascii_whitespace)
+}
+
+/// A saved provider list replaces the default one, so Subsonic reaches an existing user once.
+fn offer_subsonic_lyrics(mut values: Values) -> Values {
+    if !values.subsonic_lyrics_offered {
+        values.subsonic_lyrics_offered = true;
+        if !values
+            .lyrics_providers
+            .iter()
+            .any(|name| name == "Subsonic")
+        {
+            values.lyrics_providers.push("Subsonic".to_owned());
+        }
     }
-    let theme = object
-        .get("theme")
-        .and_then(serde_json::Value::as_object)
-        .context("theme must contain an object")?;
-    for field in theme.keys() {
-        anyhow::ensure!(
-            ThemeOverrides::is_color(field),
-            "`{field}` is not a theme color"
-        );
-    }
-    let file: ThemeFile = serde_json::from_value(value)
-        .with_context(|| format!("cannot decode {}", path.display()))?;
-    anyhow::ensure!(
-        file.version == THEME_FORMAT_VERSION,
-        "unsupported theme format version {}",
-        file.version
-    );
-    let name = file.name.trim();
-    anyhow::ensure!(!name.is_empty(), "theme name is empty");
-    anyhow::ensure!(!file.author.trim().is_empty(), "theme author is empty");
-    if let Some(field) = file.theme.invalid_color() {
-        anyhow::bail!("theme.{field} is not a valid color");
-    }
-    Ok(CustomTheme {
-        id: id.to_owned(),
-        name: name.to_owned(),
-        theme: file.theme,
-    })
+    values
 }
 
 fn themes_path(settings: &Path) -> PathBuf {
@@ -2126,15 +2365,19 @@ fn changed_files(
         }
 
         let theme_path = |path: &Path| {
-            theme_roots.iter().any(|root| {
-                same_path(path, root, case_insensitive)
-                    || (path
-                        .parent()
-                        .is_some_and(|parent| same_path(parent, root, case_insensitive))
-                        && path
-                            .extension()
-                            .is_some_and(|extension| extension == "json"))
-            })
+            let json = path
+                .extension()
+                .is_some_and(|extension| extension == "json");
+            let within = |path: Option<&Path>| {
+                path.is_some_and(|path| {
+                    theme_roots
+                        .iter()
+                        .any(|root| same_path(path, root, case_insensitive))
+                })
+            };
+            within(Some(path))
+                || within(path.parent())
+                || (json && within(path.parent().and_then(Path::parent)))
         };
         if theme_path(&absolute) || canonical.as_deref().is_some_and(theme_path) {
             changed.themes = true;
@@ -2189,6 +2432,73 @@ fn absolute_path(path: &Path) -> PathBuf {
     std::env::current_dir()
         .map(|directory| directory.join(path))
         .unwrap_or_else(|_| path.to_owned())
+}
+
+/// Keeps the previous valid settings in `sonora.backup.json` before saving a new version.
+/// Unchanged saves and empty or broken previous files leave the backup alone. The caller must
+/// check that `previous` still matches the last contents it accepted from disk.
+fn save_settings(path: &Path, bytes: &[u8], previous: Option<&[u8]>) -> Result<()> {
+    if previous == Some(bytes) {
+        return Ok(());
+    }
+    if let Some(previous) =
+        previous.filter(|previous| serde_json::from_slice::<Values>(json(previous)).is_ok())
+    {
+        write_settings(&path.with_file_name("sonora.backup.json"), previous)
+            .context("cannot back up settings")?;
+    }
+    write_settings(path, bytes)
+}
+
+/// Replaces settings with a synced file beside the destination, so an interrupted save leaves
+/// the previous contents intact. Symlinks keep pointing to their target. The file can hold
+/// scrobbling keys, so on unix only its owner may read it.
+fn write_settings(path: &Path, bytes: &[u8]) -> Result<()> {
+    let path = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            fs::canonicalize(path).context("cannot resolve settings symlink")?
+        }
+        Ok(_) => path.to_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => path.to_owned(),
+        Err(error) => return Err(error).context("cannot inspect settings file"),
+    };
+    let parent = path.parent().context("cannot find settings directory")?;
+    match fs::metadata(&path) {
+        Ok(metadata) => anyhow::ensure!(
+            !metadata.permissions().readonly(),
+            "cannot write read-only settings file"
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("cannot read settings permissions"),
+    }
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".settings-")
+        .tempfile_in(parent)
+        .context("cannot create temporary settings file")?;
+    temporary
+        .write_all(bytes)
+        .context("cannot write temporary settings file")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        temporary
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .context("cannot restrict settings permissions")?;
+    }
+    temporary
+        .as_file()
+        .sync_all()
+        .context("cannot sync temporary settings file")?;
+    temporary
+        .persist(&path)
+        .map_err(|error| error.error)
+        .context("cannot replace settings file")?;
+    #[cfg(unix)]
+    if let Err(error) = fs::File::open(parent).and_then(|folder| folder.sync_all()) {
+        log::debug!("settings: cannot sync {}: {error}", parent.display());
+    }
+    Ok(())
 }
 
 fn settings_path() -> PathBuf {
@@ -2270,6 +2580,53 @@ fn place(pinned: &mut Vec<Held>, slug: &str, pin: Pin, gap: Option<usize>, slugs
     true
 }
 
+/// The saved order with unknown and repeated names dropped and every source it lacks appended
+/// in the default order.
+fn lyrics_priority(saved: &[String]) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    for name in saved.iter().map(String::as_str).chain(LYRICS_SOURCES) {
+        if LYRICS_SOURCES.contains(&name) && !order.iter().any(|held| held == name) {
+            order.push(name.to_owned());
+        }
+    }
+    order
+}
+
+/// The positions in `order` that hold an enabled source.
+fn enabled_slots(order: &[String], enabled: &[String]) -> Vec<usize> {
+    (0..order.len())
+        .filter(|index| enabled.contains(&order[*index]))
+        .collect()
+}
+
+/// Moves `provider` into a gap between the enabled sources and writes them back into the slots
+/// they held, so disabled sources stay where they were. Returns whether anything moved.
+fn place_lyrics_provider(
+    order: &mut [String],
+    enabled: &[String],
+    provider: &str,
+    gap: usize,
+) -> bool {
+    let slots = enabled_slots(order, enabled);
+    let mut visible: Vec<String> = slots.iter().map(|index| order[*index].clone()).collect();
+    let Some(from) = visible.iter().position(|name| name == provider) else {
+        return false;
+    };
+    let to = match gap > from {
+        true => gap - 1,
+        false => gap,
+    };
+    if to == from || to >= visible.len() {
+        return false;
+    }
+    let moved = visible.remove(from);
+    visible.insert(to, moved);
+    for (index, name) in slots.into_iter().zip(visible) {
+        order[index] = name;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -2277,6 +2634,72 @@ mod tests {
     use super::*;
     use crate::queue::Stub;
     use ui::PinKind;
+
+    #[test]
+    fn lyrics_priority_defaults_and_round_trips_independently_of_enablement() {
+        let mut values: Values = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            values.lyrics_provider_priority,
+            [
+                LOCAL,
+                "Subsonic",
+                "Musixmatch",
+                "LrcLib",
+                "Kugou",
+                "NetEase"
+            ]
+            .map(str::to_owned)
+        );
+        assert_eq!(
+            lyrics_priority(&values.lyrics_provider_priority),
+            lyrics_priority(&[])
+        );
+        values.lyrics_provider_priority = vec!["LrcLib".into(), "Kugou".into()];
+        values.lyrics_providers = vec!["Kugou".into()];
+        let loaded: Values =
+            serde_json::from_str(&serde_json::to_string(&values).unwrap()).unwrap();
+        assert_eq!(
+            loaded.lyrics_provider_priority,
+            values.lyrics_provider_priority
+        );
+        assert_eq!(loaded.lyrics_providers, values.lyrics_providers);
+    }
+
+    #[test]
+    fn lyrics_priority_ignores_unknown_and_duplicate_sources_and_appends_missing_ones() {
+        let order = lyrics_priority(&["LrcLib".into(), "unknown".into(), "LrcLib".into()]);
+        assert_eq!(order[0], "LrcLib");
+        assert_eq!(order.len(), 6);
+        assert!(!order.iter().any(|name| name == "unknown"));
+        assert_eq!(order.iter().filter(|name| *name == "LrcLib").count(), 1);
+    }
+
+    #[test]
+    fn dropping_lyrics_sources_lands_in_the_gap_and_preserves_disabled_slots() {
+        let mut order = vec![
+            "Subsonic".into(),
+            "Musixmatch".into(),
+            "LrcLib".into(),
+            "Kugou".into(),
+        ];
+        let enabled = vec!["Subsonic".into(), "LrcLib".into(), "Kugou".into()];
+        assert!(place_lyrics_provider(&mut order, &enabled, "Kugou", 0));
+        assert_eq!(order, vec!["Kugou", "Musixmatch", "Subsonic", "LrcLib"]);
+        assert!(place_lyrics_provider(&mut order, &enabled, "Kugou", 3));
+        assert_eq!(order, vec!["Subsonic", "Musixmatch", "LrcLib", "Kugou"]);
+        assert!(place_lyrics_provider(&mut order, &enabled, "Subsonic", 2));
+        assert_eq!(order, vec!["LrcLib", "Musixmatch", "Subsonic", "Kugou"]);
+        assert!(!place_lyrics_provider(&mut order, &enabled, "Subsonic", 1));
+        assert!(!place_lyrics_provider(&mut order, &enabled, "Subsonic", 2));
+        assert!(!place_lyrics_provider(&mut order, &enabled, "Subsonic", 9));
+        assert!(!place_lyrics_provider(
+            &mut order,
+            &enabled,
+            "Musixmatch",
+            0
+        ));
+        assert!(!place_lyrics_provider(&mut order, &[], "Subsonic", 0));
+    }
 
     fn resume(provider: &str, playing: &str, position: f32) -> Resume {
         Resume {
@@ -2419,6 +2842,7 @@ mod tests {
         assert!(loaded.sidebar_right_open);
         assert_eq!(loaded.pinned.len(), 1);
 
+        drop(store);
         fs::remove_file(path).expect("test database is removed");
         fs::remove_dir(root).expect("test directory is removed");
     }

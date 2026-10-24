@@ -4,7 +4,7 @@ use gpui::{
 };
 use i18n::t;
 use music::Track;
-use state::{History, HistoryState, Playback};
+use state::{History, HistoryState, Playback, Sonora};
 use ui::{
     ActiveTheme as _, Button, Listing as _, Modal, Scrollbar, Scroller, TableDelegate, TableEvent,
     TableState, runtime, table, vacant,
@@ -51,6 +51,7 @@ impl HistoryView {
         let scroll = scrollbar.read(cx).scroll().clone();
         let table = cx.new(|cx| {
             let menu = cx.new(|_| Scrollbar::inset().watching(id));
+            crate::shared::tracks::follow_downloads(cx);
             let source = TrackSource::new(
                 HISTORY_COLUMNS,
                 HistoryTracks(history.clone()),
@@ -59,6 +60,7 @@ impl HistoryView {
                 cx,
             )
             .with_history(history.clone())
+            .with_liked(Sonora::global(cx).library.clone())
             .table(cx.weak_entity());
             TableState::new(TableDelegate::new(source, width, cx), cx).follow(scroll)
         });
@@ -69,6 +71,12 @@ impl HistoryView {
         })
         .detach();
         cx.observe(&playback, |this, _, cx| {
+            this.table.refresh(cx);
+            cx.notify();
+        })
+        .detach();
+        let library = Sonora::global(cx).library.clone();
+        cx.observe(&library, |this, _, cx| {
             this.table.refresh(cx);
             cx.notify();
         })
@@ -189,6 +197,7 @@ impl Render for HistoryView {
 
         let note = self.note(cx);
         let page = Scroller::new("history-page", &self.scrollbar)
+            .bottom_inset(crate::chrome::Chrome::bottom(cx))
             .pt(inset)
             .pb(inset)
             .child(div().px(inset).child(self.header(cx)))

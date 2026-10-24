@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyView, App, Bounds, Context, Entity, FocusHandle, FontWeight, KeyDownEvent, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent,
-    SharedString, SpringState, Task,
+    AnyView, App, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight, KeyDownEvent,
+    MouseButton, MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    Render, ScrollWheelEvent, SharedString, SpringState, Task, TextShadow,
 };
 use gpui::{Window, canvas, deferred, div, phi, px, relative};
 use i18n::t;
-use input::{ToggleFullscreen, WORKSPACE_CONTEXT};
+use input::{ToggleFullscreen, ToggleWindowFullscreen, WORKSPACE_CONTEXT};
 use router::{Destination, navigate};
 use state::{AppSettings, Cover, FullscreenControlsAutohide, Playback, Queue, SideTab, Sonora};
 use ui::{
@@ -21,11 +21,11 @@ use ui::{
 
 use crate::chrome::{Aside, TitleBarOptions};
 use crate::shared::menus::ItemMenu;
-use crate::shared::transport::{NOTCH, like, moved, percent, transport, volume_icon};
-use crate::shared::veil::{Edge, veil};
+use crate::shared::transport::{NOTCH, fraction, like, moved, percent, transport, volume_icon};
 use crate::shared::visualizer::VisualizerDrive;
 use crate::shared::{self, ambient};
 use crate::shells::Shell;
+use ui::{VeilEdge, veil};
 
 const COVER_TALL: f32 = 0.46;
 const COVER_WIDE: f32 = 0.34;
@@ -62,8 +62,20 @@ const VEIL: f32 = 0.34;
 /// and gets by on a pixel; a bar of the visualizer is a hard edge and needs a real radius
 /// before it stops reading through the text over it.
 const VEIL_BLUR: Pixels = px(12.);
+/// The blur of each shadow stacked under the title and the artist line. A single blurred shadow
+/// spreads the glyphs too thin to show, so a tight one gives it a core and wider ones soften its
+/// edge.
+const TEXT_SHADOW: [f32; 3] = [1.5, 4., 10.];
+/// How hard the docked controls blur once they are all but hidden. The dock shrinks over them as
+/// they leave, so without it the last frames show the tops of the seek row cut off by its edge.
+const DOCK_BLUR: Pixels = px(8.);
+/// Below this the dock's blur is not worth a layer of its own.
+const DOCK_BLUR_LEAST: Pixels = px(0.05);
 const REST: Duration = Duration::from_millis(1500);
 const WAKE_DEBOUNCE: Duration = Duration::from_millis(400);
+/// How far the pointer has to travel, in pixels, before it wakes the controls, so the drift a
+/// resting hand gives a trackpad or a sensitive mouse leaves them asleep.
+const WAKE_TRAVEL: f64 = 3.;
 const SPRING_REST: f32 = 0.001;
 const SPRING_STALL: Duration = Duration::from_millis(64);
 
@@ -91,8 +103,12 @@ pub struct FullscreenView {
     track_menu: ItemMenu,
     context_menu: Option<(music::Track, Point<Pixels>)>,
     last_moved: Instant,
+    /// Where the pointer was when it last woke the controls, which motion is measured from.
     last_pos: Option<Point<Pixels>>,
     inside: bool,
+    /// Whether the pointer left the window and has not moved inside it since. macOS answers
+    /// `is_window_hovered` with whether the window has focus, so only the exit event tells there.
+    left: bool,
     awake: bool,
     hidden: SpringState,
     spring_beat: Instant,
@@ -121,7 +137,7 @@ impl FullscreenView {
         let me = cx.entity_id();
         let playlist_scrollbar = cx.new(|_| Scrollbar::inset().watching(me));
 
-        let mut this = Self {
+        Self {
             playback,
             queue,
             cover,
@@ -147,6 +163,7 @@ impl FullscreenView {
             last_moved: Instant::now(),
             last_pos: None,
             inside: true,
+            left: false,
             awake: true,
             hidden: SpringState {
                 position: 0.,
@@ -158,13 +175,27 @@ impl FullscreenView {
             visualizer: VisualizerDrive::default(),
             root_bounds: Rc::new(Cell::new(Bounds::default())),
             meta_bounds: Rc::new(Cell::new(Bounds::default())),
-        };
-        this.stir(cx);
-        this
+        }
     }
 
     pub fn focus(&self, window: &mut Window, cx: &mut App) {
         window.focus(&self.focus, cx);
+    }
+
+    /// Starts the idle clock as the view opens and stops it as the view closes, so it never
+    /// hides the cursor over the workspace. Either way the view next shows with its controls up.
+    pub fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
+        self.flip(true);
+        self.hidden = SpringState {
+            position: 0.,
+            velocity: 0.,
+        };
+        self.last_pos = None;
+        match shown {
+            true => self.stir(cx),
+            false => self.rest = None,
+        }
+        cx.notify();
     }
 
     fn show(&mut self, panel: Option<SideTab>, cx: &mut Context<Self>) {
@@ -210,7 +241,14 @@ impl FullscreenView {
             self.over_seek = seek;
             cx.notify();
         }
-        if self.last_pos == Some(event.position) {
+        if self.left {
+            self.left = false;
+            cx.notify();
+        }
+        let travel = self
+            .last_pos
+            .map_or(f64::INFINITY, |last| (event.position - last).magnitude());
+        if travel < WAKE_TRAVEL {
             if !self.awake {
                 cx.hide_cursor();
             }
@@ -230,6 +268,7 @@ impl FullscreenView {
     /// Whether anything under the pointer should hold the chrome awake. A hover flag only counts
     /// while the pointer is over the window: one set when it left stays set, and a stale flag
     /// would keep the controls up for good.
+    /// the pointer over the dialog never reaches the view and the cursor would hide under it.
     fn busy(&self, cx: &App) -> bool {
         let parked = self.over_volume
             || self.over_zone
@@ -249,7 +288,7 @@ impl FullscreenView {
     /// event the pointer has to be present for, so the ones still set when it left the window are
     /// dropped here instead. Crossing the window edge repaints on its own, so this is never late.
     fn watch(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let inside = window.is_window_hovered();
+        let inside = window.is_window_hovered() && !self.left;
         if inside == self.inside {
             return;
         }
@@ -329,7 +368,7 @@ impl FullscreenView {
             true => NOTCH,
             false => -NOTCH,
         };
-        let level = (self.playback.read(cx).volume() + notch).clamp(0., 1.);
+        let level = (self.playback.read(cx).shown_volume(cx) + notch).clamp(0., 1.);
         self.muted = None;
         self.playback
             .update(cx, |playback, cx| playback.set_volume(level, cx));
@@ -353,24 +392,29 @@ impl FullscreenView {
         let radius = cx.theme().radius * 2.;
         let pad = px(COVER_LAYER_PAD);
         let inset = (layout_side - raster_side) / 2. - pad;
-        let track = self.playback.read(cx).track().cloned();
-        let album = track.as_ref().and_then(|track| track.album_id.clone());
-        let small = track.as_ref().and_then(|track| track.cover.clone());
-        let cover_large = self.cover.read(cx).large();
-        let large = cover_large
-            .filter(|url| small.is_some() && Some(*url) != small.as_deref())
-            .map(SharedString::from);
+        let (album, small, local_id) = match self.playback.read(cx).shown_track(cx) {
+            Some(track) => {
+                let local = track.id.as_deref().is_some_and(music::is_local_id);
+                (track.album_id, track.cover, local)
+            }
+            None => (None, None, false),
+        };
+        let cover_large = album
+            .as_deref()
+            .and_then(|album| self.cover.read(cx).large_for(album));
+        let local = local_id || small.as_ref().is_some_and(|url| url.starts_with("file://"));
+        // Only upgrade resolution for non-local tracks, since a local cover is always
+        // the full resolution picture. The track's own embedded cover is prioritized
+        // over the cover of its album.
+        let large =
+            cover_large.filter(|url| !local && small.is_some() && Some(*url) != small.as_deref());
 
-        if self.large != large {
-            self.large = large.clone();
+        if self.large.as_deref() != large {
+            self.large = large.map(SharedString::from);
             self.revision += 1;
         }
+        let large = self.large.clone();
         let revision = self.revision;
-        let local = track
-            .as_ref()
-            .and_then(|track| track.id.as_deref())
-            .is_some_and(music::is_local_id)
-            || small.as_ref().is_some_and(|url| url.starts_with("file://"));
         let waiting = !local && album.is_some() && cover_large.is_none();
 
         div()
@@ -406,7 +450,8 @@ impl FullscreenView {
                                 .child(
                                     Artwork::new(Some(url))
                                         .size(raster_side)
-                                        .corner_radius(radius),
+                                        .corner_radius(radius)
+                                        .overlay(),
                                 )
                                 .motion(("cover-large", revision), Motion::Slow, |art, t| {
                                     art.opacity(t)
@@ -430,17 +475,21 @@ impl FullscreenView {
     fn meta(&self, hide: f32, lift: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let frosted = ambient::shown(cx);
-        let track = self.playback.read(cx).track().cloned();
-        let title = match &track {
+        let shown = self.playback.read(cx).shown_track(cx);
+        let track = shown.as_ref();
+        let title = match track {
             Some(track) => SharedString::from(track.name.clone()),
             None => t!("player-nothing-playing"),
         };
-        let album = track.as_ref().and_then(|track| track.album_id.clone());
-        let explicit = track.as_ref().is_some_and(|track| track.explicit);
-        let held = track.clone();
-        let source = source(&track, cx);
+        let album = track.and_then(|track| track.album_id.clone());
+        let explicit = track.is_some_and(|track| track.explicit);
         let meta_bounds = self.meta_bounds.clone();
-        let trailing = |track: Option<music::Track>, cx: &App| {
+        // Both lines carry a shadow in the page colour, so they stay legible where a visualizer
+        // peak or bright ambient art passes behind them. The title ellipsizes without
+        // `truncate`, whose `overflow_hidden` would clip the shadow to the line box.
+        let effects = shared::effects();
+        let shadow = TEXT_SHADOW.map(|blur| TextShadow::new(theme.background).blur(px(blur)));
+        let trailing = |track: Option<&music::Track>, cx: &App| {
             div()
                 .flex()
                 .flex_none()
@@ -449,19 +498,12 @@ impl FullscreenView {
                 .when(explicit, |this| {
                     this.child(div().flex_none().child(ExplicitBadge::new()))
                 })
-                .when_some(source, |this, (slug, name)| {
-                    this.child(
-                        div()
-                            .flex_none()
-                            .child(crate::shared::provider_chip(slug, name, cx)),
-                    )
-                })
                 .child(
                     div()
                         .flex()
                         .flex_none()
                         .opacity(1. - hide)
-                        .child(like(track, cx).when(frosted, Button::frosted)),
+                        .child(like(track, &self.playback, cx).when(frosted, Button::frosted)),
                 )
         };
 
@@ -506,7 +548,8 @@ impl FullscreenView {
                         div()
                             .id("fullscreen-title")
                             .min_w_0()
-                            .truncate()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
                             .text_size(theme.text(Text::Title))
                             .font_weight(FontWeight::SEMIBOLD)
                             .when_some(album, |this, album| {
@@ -517,7 +560,7 @@ impl FullscreenView {
                             .on_mouse_down(
                                 MouseButton::Right,
                                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                    let Some(track) = held.clone() else {
+                                    let Some(track) = this.playback.read(cx).shown_track(cx) else {
                                         return;
                                     };
                                     window.prevent_default();
@@ -525,23 +568,28 @@ impl FullscreenView {
                                     cx.stop_propagation();
                                 }),
                             )
+                            .when(effects, |this| this.text_shadow(shadow))
                             .child(title),
                     )
-                    .child(div().flex().flex_1().child(trailing(track.clone(), cx))),
+                    .child(div().flex().flex_1().child(trailing(track, cx))),
             )
             .when_some(track, |this, track| {
                 this.child(
                     div().flex().w_full().min_w_0().justify_center().child(
                         InlineLinks::new(
                             "fullscreen-artists",
-                            track.artist_refs.into_iter().map(|artist| {
-                                InlineLink::new(artist.name, artist.id.map(Into::into))
+                            track.artist_refs.iter().map(|artist| {
+                                InlineLink::new(
+                                    artist.name.clone(),
+                                    artist.id.clone().map(Into::into),
+                                )
                             }),
-                            track.artists,
+                            track.artists.clone(),
                             theme.muted_foreground,
                         )
                         .text_size(theme.text(Text::Body))
                         .truncate()
+                        .when(effects, |this| this.text_shadow(shadow))
                         .on_click(|id, cx| navigate(Destination::Artist(id), cx)),
                     ),
                 )
@@ -552,15 +600,14 @@ impl FullscreenView {
         let theme = *cx.theme();
         let frosted = ambient::shown(cx);
         let cover = ui::snapped(theme.metrics.row, window);
-        let track = self.playback.read(cx).track().cloned();
-        let title = match &track {
+        let shown = self.playback.read(cx).shown_track(cx);
+        let track = shown.as_ref();
+        let title = match track {
             Some(track) => SharedString::from(track.name.clone()),
             None => t!("player-nothing-playing"),
         };
-        let album = track.as_ref().and_then(|track| track.album_id.clone());
-        let explicit = track.as_ref().is_some_and(|track| track.explicit);
-        let held = track.clone();
-        let source = source(&track, cx);
+        let album = track.and_then(|track| track.album_id.clone());
+        let explicit = track.is_some_and(|track| track.explicit);
 
         div()
             .flex()
@@ -575,7 +622,7 @@ impl FullscreenView {
                         this.cursor_pointer()
                             .on_click(move |_, _, cx| open_album(&album, cx))
                     })
-                    .child(Artwork::new(track.as_ref().and_then(|t| t.cover.clone())).size(cover)),
+                    .child(Artwork::new(track.and_then(|t| t.cover.clone())).size(cover)),
             )
             .child(
                 div()
@@ -605,7 +652,9 @@ impl FullscreenView {
                                         MouseButton::Right,
                                         cx.listener(
                                             move |this, event: &MouseDownEvent, window, cx| {
-                                                let Some(track) = held.clone() else {
+                                                let Some(track) =
+                                                    this.playback.read(cx).shown_track(cx)
+                                                else {
                                                     return;
                                                 };
                                                 window.prevent_default();
@@ -619,29 +668,21 @@ impl FullscreenView {
                             .when(explicit, |this| {
                                 this.child(div().flex_none().child(ExplicitBadge::new()))
                             })
-                            .when_some(source, |this, (slug, name)| {
-                                this.child(
-                                    div()
-                                        .flex_none()
-                                        .child(crate::shared::provider_chip(slug, name, cx)),
-                                )
-                            })
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_none()
-                                    .opacity(1. - hide)
-                                    .child(like(track.clone(), cx).when(frosted, Button::frosted)),
-                            ),
+                            .child(div().flex().flex_none().opacity(1. - hide).child(
+                                like(track, &self.playback, cx).when(frosted, Button::frosted),
+                            )),
                     )
                     .when_some(track, |this, track| {
                         this.child(
                             InlineLinks::new(
                                 "strip-artists",
-                                track.artist_refs.into_iter().map(|artist| {
-                                    InlineLink::new(artist.name, artist.id.map(Into::into))
+                                track.artist_refs.iter().map(|artist| {
+                                    InlineLink::new(
+                                        artist.name.clone(),
+                                        artist.id.clone().map(Into::into),
+                                    )
                                 }),
-                                track.artists,
+                                track.artists.clone(),
                                 theme.muted_foreground,
                             )
                             .text_size(theme.text(Text::Small))
@@ -658,13 +699,9 @@ impl FullscreenView {
         let empty = muted.opacity(0.3);
         let text = theme.text(Text::Tiny);
         let playback = self.playback.read(cx);
-        let seekable = playback.track().is_some();
-        let progress = self.pending.unwrap_or_else(|| playback.progress());
-        let elapsed = playback.position();
-        let total = playback
-            .track()
-            .map(|track| track.duration)
-            .unwrap_or(Duration::ZERO);
+        let seekable = playback.shown_track(cx).is_some();
+        let (elapsed, total) = playback.shown_time(cx);
+        let progress = self.pending.unwrap_or_else(|| fraction(elapsed, total));
         let width = text
             * match total.as_secs() >= 3600 {
                 true => CLOCK_LONG,
@@ -723,6 +760,7 @@ impl FullscreenView {
         };
 
         div()
+            .id("fullscreen-controls")
             .flex()
             .flex_col()
             .items_center()
@@ -730,6 +768,7 @@ impl FullscreenView {
             .w_full()
             .max_w(px(SEEK_MAX))
             .flex_none()
+            .on_click(|_, _, cx| cx.stop_propagation())
             .when(inline, |this| this.child(self.pill(cx)))
             .child(self.seek(cx))
             .child(
@@ -767,6 +806,10 @@ impl FullscreenView {
                 this.max_h(cap * (1. - hide))
                     .overflow_hidden()
                     .opacity(1. - hide)
+            })
+            .map(|this| match DOCK_BLUR * hide {
+                blur if blur > DOCK_BLUR_LEAST && hide < 1. && shared::effects() => this.blur(blur),
+                _ => this,
             })
             .when(hide < 1., |this| {
                 this.child(
@@ -845,7 +888,7 @@ impl FullscreenView {
         let frosted = ambient::shown(cx);
         let hazy = frosted && ui::blurring(cx);
         let zone = px(VOLUME_ZONE);
-        let level = self.playback.read(cx).volume();
+        let level = self.playback.read(cx).shown_volume(cx);
         let empty = theme.muted_foreground.opacity(0.3);
         let restore = self.muted.unwrap_or(0.7);
         let span = theme.metrics.control_small + zone * 2.;
@@ -1026,17 +1069,6 @@ fn open_album(album: &str, cx: &mut App) {
     navigate(Destination::Album(album.into()), cx);
 }
 
-/// The provider the playing track belongs to, as (slug, name) for `provider_chip`. `None`
-/// keeps the chrome clean when only one source is live.
-fn source(track: &Option<music::Track>, cx: &App) -> Option<(&'static str, &'static str)> {
-    let session = Sonora::global(cx).session.read(cx);
-    if session.active_slugs().len() < 2 {
-        return None;
-    }
-    let id = track.as_ref()?.id.as_deref()?;
-    session.slug_for(id).zip(session.name_for(id))
-}
-
 impl Shell for FullscreenView {
     fn title_bar(&self, _content: Option<AnyView>, cx: &App) -> TitleBarOptions {
         TitleBarOptions {
@@ -1129,7 +1161,7 @@ impl Render for FullscreenView {
         let staged = self.panel.is_none() || split;
 
         let style = self.settings.read(cx).visualizer_style();
-        let visualizer_on = self.panel.is_none() && style.shown();
+        let visualizer_on = self.panel.is_none() && style.shown() && true;
         match visualizer_on
             .then(|| self.playback.read(cx).spectrum(cx))
             .flatten()
@@ -1145,13 +1177,17 @@ impl Render for FullscreenView {
         let root_bounds = self.root_bounds.clone();
         // The visualizer and its veil sit flush with the window's bottom corners.
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        let corner = crate::chrome::window_radius(self.settings.read(cx), cx);
+        let corner = crate::chrome::window_radius(self.settings.read(cx), cx, window);
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
         let corner: Option<Pixels> = None;
+        let visualizer_tint = match ambient::shown(cx) {
+            true => theme.tint.map(|tint| theme.primary_of(tint)),
+            false => None,
+        };
 
         div()
             .id("fullscreen")
-            .key_context(WORKSPACE_CONTEXT)
+            .key_context(super::shell_context(WORKSPACE_CONTEXT))
             .track_focus(&self.focus)
             .relative()
             .flex()
@@ -1162,11 +1198,25 @@ impl Render for FullscreenView {
             .gap_5()
             .px_8()
             .pb_6()
+            .on_click(|event: &ClickEvent, window, cx| {
+                if event.click_count() == 2 {
+                    window.dispatch_action(Box::new(ToggleWindowFullscreen), cx);
+                }
+            })
             .on_mouse_move(cx.listener(Self::hover))
+            .on_mouse_exit(cx.listener(|this, _: &MouseExitEvent, _, cx| {
+                this.left = true;
+                cx.notify();
+            }))
             // Capture phase: every click stirs the idle timer, even one a
             // control underneath swallows for itself.
             .capture_any_mouse_down(cx.listener(|this, _: &MouseDownEvent, _, cx| this.poke(cx)))
-            .on_scroll_wheel(cx.listener(|this, _: &ScrollWheelEvent, _, cx| this.poke(cx)))
+            // A trackpad reports fingers that only touch it as a scroll that moves nothing.
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+                if event.delta.pixel_delta(window.line_height()) != Point::default() {
+                    this.poke(cx);
+                }
+            }))
             .on_key_down(cx.listener(|this, _: &KeyDownEvent, _, cx| this.poke(cx)))
             .child(
                 canvas(move |bounds, _, _| root_bounds.set(bounds), |_, _, _, _| {})
@@ -1177,6 +1227,7 @@ impl Render for FullscreenView {
                 this.child(
                     Visualizer::new(self.visualizer.levels(), visualizer_max)
                         .style_kind(style)
+                        .when_some(visualizer_tint, |this, tint| this.tint(tint))
                         .when_some(corner, |this, radius| this.corner_radius(radius))
                         .absolute()
                         .left_0()
@@ -1199,7 +1250,7 @@ impl Render for FullscreenView {
                         .h(band)
                         .opacity(1. - hide)
                         .child(veil(
-                            Edge::Bottom,
+                            VeilEdge::Bottom,
                             band,
                             VEIL_BLUR,
                             theme.background,
@@ -1247,6 +1298,7 @@ impl Render for FullscreenView {
                     .when(self.panel.is_some(), |this| {
                         this.child(
                             div()
+                                .id("fullscreen-panel")
                                 .relative()
                                 .flex()
                                 .flex_col()
@@ -1254,6 +1306,7 @@ impl Render for FullscreenView {
                                 .min_w_0()
                                 .min_h_0()
                                 .h_full()
+                                .on_click(|_, _, cx| cx.stop_propagation())
                                 .child(self.aside.clone())
                                 .when(shown, |this| this.child(self.floating(hide, cx))),
                         )

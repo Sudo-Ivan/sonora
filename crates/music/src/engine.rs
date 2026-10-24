@@ -7,8 +7,8 @@
 //! join, where a position is reported from, and what a lost output device does.
 //!
 //! A provider supplies [`Fetch`]: how to get a track and how to open a decoder over it. Local
-//! reads a file from disk, Subsonic hands over a plain response, and Deezer decrypts Blowfish
-//! stripes as they arrive.
+//! reads a file from disk, Subsonic hands over a plain response, Deezer decrypts Blowfish
+//! stripes as they arrive, and Tidal fetches DASH segments one after another.
 //!
 //! Loudness normalisation lives here too. A provider only reports how loud a track is, and the
 //! engine decides what gain that earns.
@@ -17,16 +17,24 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, TryRecvError, channel};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, anyhow, ensure};
 use async_trait::async_trait;
+use futures::future::BoxFuture;
 use rodio::Source as _;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::oneshot;
 
 use crate::audio::{Chain, Volume};
 use crate::sink::{Cue, Paced, packet, watch_for_output};
 use crate::spectrum::Spectrum;
-use crate::{PlaybackConfig, PlaybackEvent, PlaybackEvents, Player};
+use crate::vault::Shelf;
+use crate::{
+    Encoding, Fraction, Normalisation, PlaybackConfig, PlaybackEvent, PlaybackEvents, Player,
+    TrackSignal,
+};
 
+/// How often a download reports how far it has got.
+const PROGRESS_EVERY: Duration = Duration::from_millis(250);
 /// How many frames the decoder hands over at a time. Small enough that a skip is heard at once,
 /// large enough that the queue is not rebuilt for every few samples.
 const CHUNK: usize = 4096;
@@ -77,6 +85,18 @@ pub trait Fetch: Send + Sync + 'static {
     /// What to call this engine's threads.
     fn name(&self) -> &'static str;
 
+    /// Where this provider keeps tracks, when it keeps any. A provider with a shelf can download
+    /// a track without playing it.
+    fn shelf(&self) -> Option<&Shelf> {
+        None
+    }
+
+    /// Whether a track on the shelf plays with no network. A provider that has to license every
+    /// play says no, and its downloads only save the fetch.
+    fn plays_offline(&self) -> bool {
+        true
+    }
+
     /// Fetches a track: enough of it to start decoding, not all of it.
     async fn load(&self, id: &str) -> Result<Self::Loaded>;
 
@@ -92,6 +112,11 @@ pub trait Fetch: Send + Sync + 'static {
         None
     }
 
+    /// How the track is encoded, when the fetch learned it. The signal path shows it.
+    fn encoding(&self, _loaded: &Self::Loaded) -> Option<Encoding> {
+        None
+    }
+
     /// Whether a failed load means the listener has to sign in. The engine reports that as
     /// gated rather than as the track being unavailable.
     fn gated(&self, _error: &anyhow::Error) -> bool {
@@ -103,9 +128,27 @@ pub trait Fetch: Send + Sync + 'static {
     /// this one. The default answers at once, which suits a track that is already on disk.
     async fn downloaded(&self, _loaded: &Self::Loaded) {}
 
+    /// How much of the track has arrived, from 0 to 1, when the fetch can tell. A download shows
+    /// it as it goes.
+    fn progress(&self, _loaded: &Self::Loaded) -> Option<f32> {
+        None
+    }
+
     /// Opens a decoder placed at `at`. `None` means the track cannot be played, which the
     /// engine reports as unavailable.
     fn open(&self, id: &str, loaded: &Self::Loaded, at: Duration) -> Option<Self::Source>;
+
+    /// Opens a decoder as near `at` as the download allows and says where it really starts,
+    /// which is where the engine reports the position from. The default is [`open`](Self::open)
+    /// exactly at `at`. A provider that may have to start earlier than asked overrides this.
+    fn open_near(
+        &self,
+        id: &str,
+        loaded: &Self::Loaded,
+        at: Duration,
+    ) -> Option<(Self::Source, Duration)> {
+        self.open(id, loaded, at).map(|source| (source, at))
+    }
 
     /// Whether a seek opens a second decoder at the target rather than moving the running one.
     ///
@@ -126,6 +169,8 @@ pub fn start<F: Fetch>(
     let spectrum = Spectrum::new();
     let engine_spectrum = spectrum.clone();
     let name = fetch.name();
+    let shelf = fetch.shelf().cloned();
+    let offline = fetch.plays_offline();
     let spawned = std::thread::Builder::new()
         .name(format!("{name}-playback"))
         .spawn(move || run(Arc::new(fetch), config, command_rx, events, engine_spectrum));
@@ -133,7 +178,12 @@ pub fn start<F: Fetch>(
         log::error!("playback: cannot spawn the {name} engine thread: {error}");
     }
     (
-        Box::new(Handle { commands, spectrum }),
+        Box::new(Handle {
+            commands,
+            spectrum,
+            shelf,
+            offline,
+        }),
         Box::new(Events(event_rx)),
     )
 }
@@ -153,6 +203,12 @@ enum Command {
     Pause,
     Seek(Duration),
     Gain(f32),
+    /// Fetch a whole track into the downloads without playing it, and say how that went.
+    Download {
+        id: String,
+        progress: Fraction,
+        done: oneshot::Sender<Result<()>>,
+    },
 }
 
 /// What the audio thread is told to do. Everything that touches the network has happened by the
@@ -183,6 +239,11 @@ enum Job<F: Fetch> {
 struct Handle {
     commands: UnboundedSender<Command>,
     spectrum: Spectrum,
+    /// Where the provider keeps tracks, which says what is downloaded without asking the
+    /// engine thread.
+    shelf: Option<Shelf>,
+    /// Whether what is on the shelf plays with no network, as [`Fetch::plays_offline`] said.
+    offline: bool,
 }
 
 impl Player for Handle {
@@ -236,6 +297,45 @@ impl Player for Handle {
     fn spectrum(&self) -> Option<Spectrum> {
         Some(self.spectrum.clone())
     }
+
+    fn download(&self, track_id: &str, progress: Fraction) -> BoxFuture<'static, Result<()>> {
+        let (done, answer) = oneshot::channel();
+        let sent = match self.shelf {
+            Some(_) => self
+                .commands
+                .send(Command::Download {
+                    id: track_id.to_owned(),
+                    progress,
+                    done,
+                })
+                .context("cannot reach the playback engine"),
+            None => Err(anyhow!("this provider cannot download")),
+        };
+        Box::pin(async move {
+            sent?;
+            answer.await.context("the playback engine stopped")?
+        })
+    }
+
+    fn downloaded(&self, track_id: &str) -> bool {
+        self.shelf
+            .as_ref()
+            .is_some_and(|shelf| shelf.holds(track_id))
+    }
+
+    fn plays_offline(&self, track_id: &str) -> bool {
+        self.offline
+            && self
+                .shelf
+                .as_ref()
+                .is_some_and(|shelf| shelf.may_hold(track_id))
+    }
+
+    fn discard(&self, track_id: &str) {
+        if let Some(shelf) = &self.shelf {
+            shelf.discard(track_id);
+        }
+    }
 }
 
 struct Events(UnboundedReceiver<PlaybackEvent>);
@@ -256,8 +356,10 @@ struct Fetched<F: Fetch> {
 }
 
 /// What the audio thread did when a track ran out: which one ended, and which one, if any, it
-/// went on to decode from the queue. The engine follows this rather than the queue it handed
-/// over, because a queued track can arrive after the end it was meant for, or fail to open.
+/// went on to decode from the queue. It is sent once the last of the ended track has been
+/// heard, since until then a seek still moves within that track. The engine follows this rather
+/// than the queue it handed over, because a queued track can arrive after the end it was meant
+/// for, or fail to open.
 struct Joined {
     ended: String,
     next: Option<String>,
@@ -300,12 +402,12 @@ async fn engine_loop<F: Fetch>(
 ) {
     let (cue, mut written) = Cue::new();
     let (changed, mut gone) = unbounded_channel();
-    // The user's gain, the shared equalizer and the spectrum tap: what every engine hands the
-    // output. A track's own loudness gain is applied as it is decoded, in `Playing`.
     let chain = Chain {
         volume: Volume::new(config.gain),
         equalizer: config.equalizer.clone(),
         spectrum,
+        meter: config.meter.clone(),
+        analyzer: config.analyzer.clone(),
     };
     let (jobs, job_rx) = channel::<Job<F>>();
     let (joins, mut joined) = unbounded_channel::<Joined>();
@@ -489,6 +591,12 @@ async fn engine_loop<F: Fetch>(
                     }
                     Command::Gain(level) => {
                         jobs.send(Job::Gain(level)).ok();
+                    }
+                    Command::Download { id, progress, done } => {
+                        let fetch = fetch.clone();
+                        tokio::spawn(async move {
+                            done.send(download(&*fetch, &id, &progress).await).ok();
+                        });
                     }
                 }
             }
@@ -690,23 +798,37 @@ fn spawn<F: Fetch>(
 
 /// The track the audio thread is decoding, and where its samples land in real time.
 struct Playing<F: Fetch> {
+    /// The track's id, as the provider knows it and the engine's events report it.
     id: String,
+
     /// Kept so a seek can open a second decoder over the same download.
     loaded: F::Loaded,
+
+    /// The decoder. `Paced` resamples what it decodes to the device's rate.
     source: F::Source,
+
+    /// The number of channels the source has.
     channels: u16,
+
+    /// The source's rate, which its packets are written at.
     rate: u32,
+
+    /// Where in the track decoding started: the open, or the last seek.
     base: Duration,
+
     /// Samples queued before this track's first one. On a gapless join the one before it is
-    /// still being heard, so its own position only starts once the count passes this.
+    /// still being heard, so its own position only starts once the count passes this. The end
+    /// of that one may still be in the resampler then, so this counts what it will add too.
     offset: u64,
+
     /// The track's normalisation gain, applied to every sample as it is decoded. Each track
     /// carries its own, so a gapless join changes it on the first sample of the next one.
     gain: f32,
 }
 
 impl<F: Fetch> Playing<F> {
-    /// Opens a decoder for one track, or reports that it cannot be played.
+    /// Opens a decoder for one track and reports what it decodes to as a `Signal` event, or
+    /// returns `None` when it cannot be played.
     fn open(
         fetch: &F,
         id: &str,
@@ -714,35 +836,59 @@ impl<F: Fetch> Playing<F> {
         at: Duration,
         offset: u64,
         normalise: bool,
+        events: &UnboundedSender<PlaybackEvent>,
     ) -> Option<Self> {
-        let source = fetch.open(id, &loaded, at)?;
+        let (source, base) = fetch.open_near(id, &loaded, at)?;
         let gain = normalisation(normalise, fetch.loudness(&loaded));
+        let (channels, rate) = (source.channels().get(), source.sample_rate().get());
+        let track = TrackSignal {
+            encoding: fetch.encoding(&loaded),
+            rate,
+            channels,
+            normalisation: match normalise {
+                true => Normalisation::Gain(20. * gain.log10()),
+                false => Normalisation::Off,
+            },
+        };
+        events
+            .send(PlaybackEvent::Signal {
+                id: id.to_owned(),
+                track,
+            })
+            .ok();
         Some(Self {
             id: id.to_owned(),
-            channels: source.channels().get(),
-            rate: source.sample_rate().get(),
+            channels,
+            rate,
             loaded,
             source,
-            base: at,
+            base,
             offset,
             gain,
         })
     }
 
-    fn mark(&self) -> Mark {
+    /// Where this track's sound is read from, given `rate`, the device's, which is what the queue
+    /// counts samples at.
+    fn mark(&self, rate: u32) -> Mark {
         Mark {
             id: self.id.clone(),
             channels: self.channels,
-            rate: self.rate,
+            rate,
             base: self.base,
             offset: self.offset,
         }
     }
 
-    /// Pulls up to `frames` frames out of the decoder. `None` means the track ended.
-    fn take(&mut self, frames: usize) -> Option<Vec<f32>> {
-        let wanted = frames * usize::from(self.channels).max(1);
-        let mut samples = Vec::with_capacity(wanted);
+    /// How many samples `frames` frames of this track hold, across every channel.
+    fn samples(&self, frames: usize) -> usize {
+        frames * usize::from(self.channels).max(1)
+    }
+
+    /// Pulls up to `frames` frames out of the decoder into `samples`, which starts empty.
+    /// `None` means the track ended.
+    fn take(&mut self, frames: usize, mut samples: Vec<f32>) -> Option<Vec<f32>> {
+        let wanted = self.samples(frames);
         for sample in self.source.by_ref().take(wanted) {
             samples.push(sample * self.gain);
         }
@@ -770,9 +916,11 @@ impl Mark {
 }
 
 /// A track whose last sample is queued but not yet heard. The events for the join wait for it,
-/// so one track's end and the next one's start land together, on the sample.
-struct Join {
+/// so one track's end and the next one's start land together, on the sample. The ended track's
+/// download is kept so a seek before then can reopen it.
+struct Join<F: Fetch> {
     ended: String,
+    loaded: F::Loaded,
     next: Option<(String, Option<Duration>)>,
     at: u64,
 }
@@ -803,22 +951,17 @@ fn audio_loop<F: Fetch>(
 
     let mut current: Option<Playing<F>> = None;
     let mut written = 0u64;
-    let mut joining: Option<Join> = None;
+    let mut joining: Option<Join<F>> = None;
     let mut heard: Option<Mark> = None;
     let mut queued: Option<(String, F::Loaded)> = None;
     let mut playing = false;
     let mut reported_at = Instant::now();
 
     loop {
-        // a track at another rate waits for the last one's tail to play out before the
-        // output reopens under it
-        let refitting = current
-            .as_ref()
-            .is_some_and(|held| !paced.fits(held.rate) && !paced.drained());
         // anything but decoding means waiting for work rather than spinning: no
         // track, a paused one, or a full queue. A restored track sits paused
         // with an empty queue, which the old condition mistook for decoding.
-        let idle = current.is_none() || !playing || paced.full() || refitting;
+        let idle = current.is_none() || !playing || paced.full();
         let job = match idle {
             false => match jobs.try_recv() {
                 Ok(job) => Some(job),
@@ -836,8 +979,14 @@ fn audio_loop<F: Fetch>(
             && cue.played() >= join.at
         {
             let Join { ended, next, .. } = joining.take().unwrap_or_else(|| unreachable!());
+            joins
+                .send(Joined {
+                    ended: ended.clone(),
+                    next: next.as_ref().map(|(id, _)| id.clone()),
+                })
+                .ok();
             events.send(PlaybackEvent::Ended { id: Some(ended) }).ok();
-            heard = current.as_ref().map(Playing::mark);
+            heard = current.as_ref().map(|held| held.mark(paced.rate()));
             match next {
                 Some((id, duration)) => {
                     announce_length(&events, &id, duration);
@@ -878,13 +1027,8 @@ fn audio_loop<F: Fetch>(
                     queued = None;
                     joining = None;
                     written = 0;
-                    current = Playing::open(fetch.as_ref(), &id, loaded, at, 0, normalise);
-                    if let Some(held) = &current
-                        && paced.fit(held.rate).is_err()
-                    {
-                        return;
-                    }
-                    heard = current.as_ref().map(Playing::mark);
+                    current = Playing::open(fetch.as_ref(), &id, loaded, at, 0, normalise, &events);
+                    heard = current.as_ref().map(|held| held.mark(paced.rate()));
                     playing = start && current.is_some();
                     match playing {
                         true if paced.play().is_err() => return,
@@ -937,6 +1081,36 @@ fn audio_loop<F: Fetch>(
                             .ok();
                     }
                 }
+                Job::Seek(position) if joining.is_some() => {
+                    // The decoder has run past the end of the track still being heard, onto the
+                    // one queued behind it or onto nothing. The seek is in the heard track, so
+                    // that track reopens and the next one goes back in the queue.
+                    let Some(join) = joining.take() else { continue };
+                    if let Some(next) = current.take() {
+                        queued = Some((next.id, next.loaded));
+                    }
+                    current = Playing::open(
+                        fetch.as_ref(),
+                        &join.ended,
+                        join.loaded,
+                        position,
+                        0,
+                        normalise,
+                        &events,
+                    );
+                    if current.is_none() {
+                        log::warn!("playback: cannot seek {}", join.ended);
+                        events
+                            .send(PlaybackEvent::Unavailable {
+                                id: Some(join.ended),
+                            })
+                            .ok();
+                        continue;
+                    }
+                    written = 0;
+                    heard = current.as_ref().map(|held| held.mark(paced.rate()));
+                    cue.arm();
+                }
                 Job::Seek(position) => {
                     let Some(held) = &mut current else { continue };
                     match fetch.reopen_to_seek() {
@@ -945,11 +1119,23 @@ fn audio_loop<F: Fetch>(
                         // has moved.
                         true => {
                             let (id, loaded) = (held.id.clone(), held.loaded.clone());
-                            match Playing::open(fetch.as_ref(), &id, loaded, position, 0, normalise)
-                            {
+                            match Playing::open(
+                                fetch.as_ref(),
+                                &id,
+                                loaded,
+                                position,
+                                0,
+                                normalise,
+                                &events,
+                            ) {
                                 Some(fresh) => current = Some(fresh),
+                                // The seek has already cleared the queue, so the old decoder
+                                // would go on unheard. The app moves on as from a failed load.
                                 None => {
                                     log::warn!("playback: cannot seek {id}");
+                                    events
+                                        .send(PlaybackEvent::Unavailable { id: Some(id) })
+                                        .ok();
                                     continue;
                                 }
                             }
@@ -964,7 +1150,7 @@ fn audio_loop<F: Fetch>(
                     }
                     joining = None;
                     written = 0;
-                    heard = current.as_ref().map(Playing::mark);
+                    heard = current.as_ref().map(|held| held.mark(paced.rate()));
                     cue.arm();
                 }
                 Job::Gain(level) => paced.set_volume(level),
@@ -976,13 +1162,16 @@ fn audio_loop<F: Fetch>(
         if idle {
             continue;
         }
-        if paced.fit(held.rate).is_err() {
-            return;
-        }
 
-        let Some(samples) = held.take(CHUNK) else {
+        let buffer = paced.buffer(held.samples(CHUNK));
+        let Some(samples) = held.take(CHUNK, buffer) else {
             // the decoder is done, but its last samples are still queued
-            let ended = current.take().map(|held| held.id).unwrap_or_default();
+            let Some(Playing {
+                id: ended, loaded, ..
+            }) = current.take()
+            else {
+                continue;
+            };
             let next = queued.take().and_then(|(id, loaded)| {
                 let duration = fetch.length(&loaded);
                 current = Playing::open(
@@ -990,33 +1179,43 @@ fn audio_loop<F: Fetch>(
                     &id,
                     loaded,
                     Duration::ZERO,
-                    written,
+                    0,
                     normalise,
+                    &events,
                 );
                 current.as_ref().map(|_| (id, duration))
             });
-            joins
-                .send(Joined {
-                    ended: ended.clone(),
-                    next: next.as_ref().map(|(id, _)| id.clone()),
-                })
-                .ok();
+            // A track that follows is written straight in behind this one, so the resampler
+            // carries on across the join, as one signal at the same format or a new span at
+            // another, and says where it lands. With nothing to follow, what it holds is let out
+            // so the end is heard.
+            let at = match &mut current {
+                Some(following) => {
+                    following.offset = written + paced.held_back() as u64;
+                    following.offset
+                }
+                None => {
+                    written += paced.flush() as u64;
+                    written
+                }
+            };
             // both events wait for the queue to reach here, so the join lands on the sample
             joining = Some(Join {
                 ended,
+                loaded,
                 next,
-                at: written,
+                at,
             });
             continue;
         };
 
-        let Some(chunk) = packet(&samples, held.channels, held.rate) else {
+        let Some(chunk) = packet(samples, held.channels, held.rate) else {
             continue;
         };
-        if paced.write(chunk).is_err() {
-            return;
+        match paced.write(chunk) {
+            Ok(queued) => written += queued as u64,
+            Err(_) => return,
         }
-        written += samples.len() as u64;
     }
 }
 
@@ -1033,6 +1232,40 @@ fn normalisation(enabled: bool, loudness: Option<Loudness>) -> f32 {
         .peak
         .map_or(1.0, |peak| (1.0 / peak).clamp(1.0, BOOST_CAP));
     wanted.min(headroom)
+}
+
+/// Fetches all of track `id` into the downloads, the way a play would fetch it, and holds on to
+/// it until the last byte is in. A track already downloaded costs nothing.
+async fn download<F: Fetch>(fetch: &F, id: &str, progress: &Fraction) -> Result<()> {
+    let shelf = fetch.shelf().context("this provider keeps nothing")?;
+    shelf.settle().await;
+    if shelf.holds(id) {
+        return Ok(());
+    }
+    shelf.want(id);
+    let fetched = async {
+        let loaded = fetch.load(id).await?;
+        let arrived = fetch.downloaded(&loaded);
+        tokio::pin!(arrived);
+        let mut ticks = tokio::time::interval(PROGRESS_EVERY);
+        loop {
+            tokio::select! {
+                () = &mut arrived => break,
+                _ = ticks.tick() => {
+                    if let Some(fraction) = fetch.progress(&loaded) {
+                        progress.set(fraction);
+                    }
+                }
+            }
+        }
+        progress.set(1.0);
+        anyhow::Ok(())
+    }
+    .await;
+    shelf.unwant(id);
+    fetched?;
+    ensure!(shelf.holds(id), "the download of {id} did not finish");
+    Ok(())
 }
 
 #[cfg(test)]

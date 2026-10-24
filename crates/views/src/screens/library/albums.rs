@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::cmp::Ordering;
+use std::io::Write as _;
 use ui::{ActiveTheme as _, Filter, FilterChange, FlagAxis, RangeAxis, Unit};
 
 use gpui::{AnyElement, App, Entity, SharedString, TextAlign};
 use i18n::t;
-use music::{Album, Shape};
-use state::{Library, LibraryPart, Origin, Playback, Shelf};
+use music::Album;
+use state::{Collection, Library, LibraryPart, Network, Origin, Playback, Shelf, Sonora};
 use ui::rank::{HANDY, NICE, SPARE, USEFUL};
 use ui::{Cell, ColumnSpec, Menu, Pin, TableSource, Width};
 
@@ -96,6 +97,8 @@ pub(super) struct AlbumSource {
     shelf: Shelf,
     year_span: Option<(f32, f32)>,
     starred: bool,
+    /// Keep only albums that were downloaded whole.
+    downloaded: bool,
     spread: RefCell<Option<Spread>>,
 }
 
@@ -118,6 +121,7 @@ impl AlbumSource {
             shelf,
             year_span: None,
             starred: false,
+            downloaded: false,
             spread: RefCell::new(None),
         }
     }
@@ -170,7 +174,7 @@ impl AlbumSource {
 
     /// Whether the shelf lists more than the favorites, so a favorites filter has something to do.
     fn catalog(&self, cx: &App) -> bool {
-        self.library.read(cx).shape(self.shelf) == Shape::Catalog
+        self.library.read(cx).shape(self.shelf).is_catalog()
     }
 }
 
@@ -186,8 +190,13 @@ impl TableSource for AlbumSource {
     }
 
     fn matches(&self, row: usize, query: &str, cx: &App) -> bool {
-        self.at(row, cx).is_some_and(|album| {
+        self.albums(cx).get(row).is_some_and(|album| {
             if self.starred && !self.library.read(cx).saved_album(&album.id) {
+                return false;
+            }
+            if (self.downloaded || Network::downloads_only(self.shelf, cx))
+                && !downloaded(&album.id, cx)
+            {
                 return false;
             }
             if let Some((low, high)) = self.year_span {
@@ -196,7 +205,7 @@ impl TableSource for AlbumSource {
                     return false;
                 }
             }
-            hits(&album, query)
+            hits(album, query)
         })
     }
 
@@ -225,6 +234,15 @@ impl TableSource for AlbumSource {
                 on: self.starred,
             }));
         }
+        // Offline mode already keeps the shelf to its downloads, so the filter would do nothing.
+        let offered = self.downloaded || !Sonora::global(cx).downloads.read(cx).is_empty();
+        if offered && !Network::downloads_only(self.shelf, cx) {
+            axes.push(Filter::Flag(FlagAxis {
+                key: "filter-downloaded",
+                label: t!("filter-downloaded"),
+                on: self.downloaded,
+            }));
+        }
         axes
     }
 
@@ -238,9 +256,14 @@ impl TableSource for AlbumSource {
                 self.starred = value;
                 true
             }
+            FilterChange::Flag("filter-downloaded", value) => {
+                self.downloaded = value;
+                true
+            }
             FilterChange::Reset => {
                 self.year_span = None;
                 self.starred = false;
+                self.downloaded = false;
                 true
             }
             _ => false,
@@ -248,7 +271,7 @@ impl TableSource for AlbumSource {
     }
 
     fn filtered(&self, _cx: &App) -> bool {
-        self.year_span.is_some() || self.starred
+        self.year_span.is_some() || self.starred || self.downloaded
     }
 
     fn playing(&self, row: usize, cx: &App) -> bool {
@@ -261,7 +284,7 @@ impl TableSource for AlbumSource {
     fn is_loading(&self, cx: &App) -> bool {
         self.library
             .read(cx)
-            .loading(self.shelf, LibraryPart::Albums)
+            .waiting(self.shelf, LibraryPart::Albums, cx)
     }
 
     fn pin(&self, row: usize, cx: &App) -> Option<Pin> {
@@ -360,7 +383,22 @@ fn hits(album: &Album, query: &str) -> bool {
     if query.is_empty() {
         return true;
     }
-    holds(&album.name, query) || holds(&album.artists, query) || holds(&year(album), query)
+    holds(&album.name, query) || holds(&album.artists, query) || year_holds(album, query)
+}
+
+/// Whether the album's year, as `year` prints it, holds the query. The digits are written on the
+/// stack, since a filter asks this of every album on every keystroke.
+fn year_holds(album: &Album, query: &str) -> bool {
+    if album.year <= 0 {
+        return query.is_empty();
+    }
+    let mut digits = [0u8; 12];
+    let mut cursor = std::io::Cursor::new(&mut digits[..]);
+    if write!(cursor, "{}", album.year).is_err() {
+        return false;
+    }
+    let written = cursor.position() as usize;
+    std::str::from_utf8(&digits[..written]).is_ok_and(|text| holds(text, query))
 }
 
 fn year(album: &Album) -> String {
@@ -369,4 +407,13 @@ fn year(album: &Album) -> String {
     } else {
         String::new()
     }
+}
+
+/// Whether an album was downloaded whole, or is on its way.
+fn downloaded(id: &str, cx: &App) -> bool {
+    Sonora::global(cx)
+        .downloads
+        .read(cx)
+        .set(Collection::Album, id)
+        .is_some()
 }

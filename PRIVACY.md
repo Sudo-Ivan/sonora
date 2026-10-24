@@ -27,6 +27,7 @@ Credentials are sent only to the relevant third-party service when required for 
 Sonora stores application data locally on the user's device, including settings, playback state, provider credentials, local-library information, and other application state required for the application to function correctly.
 
 On Linux, the running process also restricts itself with a Landlock filesystem sandbox, so it can only write its own directories and the configured music folders and only read the system directories it needs.
+By default, Sonora keeps the tracks you play on disk, so playing them again downloads nothing. This cache takes up to 2 GB, which can be changed in the settings. Tracks you download are kept until you remove them. Played and downloaded tracks are encrypted with a key held in the operating system's keychain, or in a key file only the user can read when no keychain is available. Turning off "Keep played tracks" deletes the played tracks and leaves downloads alone.
 
 ## Logs
 

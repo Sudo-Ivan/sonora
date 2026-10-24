@@ -10,6 +10,10 @@ const DISK: &str = "warn,symphonia=error,lofty=error,sonora=debug,ui=debug,music
 const FILTER: &str = "SONORA_LOG";
 const PREVIOUS: &str = "sonora.log.1";
 const LIMIT: u64 = 16 * 1024 * 1024;
+/// How many runs the log keeps, counting the one that is starting.
+const SESSIONS: usize = 5;
+/// The first line of every run, which is how a later start finds where each run began.
+const STARTED: &str = "logging: sonora";
 
 pub fn init() {
     let console = env_logger::Builder::from_env(Env::default().default_filter_or(CONSOLE))
@@ -36,7 +40,7 @@ pub fn init() {
     }
     catch_panics();
 
-    log::debug!("logging: sonora {} started", env!("CARGO_PKG_VERSION"));
+    log::debug!("{STARTED} {} started", env!("CARGO_PKG_VERSION"));
 }
 
 /// Writes a panic to the log before the default hook prints it. A Sonora started from a
@@ -118,6 +122,7 @@ impl Log for Fan {
 fn open() -> Option<Capped> {
     let path = state::log_file()?;
     fs::create_dir_all(path.parent()?).ok()?;
+    trim(&path);
 
     let outgrown = fs::metadata(&path).is_ok_and(|file| file.len() > LIMIT);
     if outgrown {
@@ -131,6 +136,32 @@ fn open() -> Option<Capped> {
         file: io::BufWriter::with_capacity(BUFFER, file),
         written,
     })
+}
+
+/// Cuts the log down to its last `SESSIONS - 1` runs, so the run that is starting makes
+/// `SESSIONS`. Once the log holds that many, everything in `PREVIOUS` is older, so it goes too.
+fn trim(path: &Path) {
+    let Ok(text) = fs::read_to_string(path) else {
+        return;
+    };
+    let marker = format!("] {STARTED} ");
+    let starts: Vec<usize> = text
+        .match_indices(&marker)
+        .map(|(at, _)| text[..at].rfind('\n').map_or(0, |line| line + 1))
+        .collect();
+    let Some(&keep) = starts
+        .len()
+        .checked_sub(SESSIONS - 1)
+        .and_then(|first| starts.get(first))
+    else {
+        return;
+    };
+    if let Some(folder) = path.parent() {
+        let _ = fs::remove_file(folder.join(PREVIOUS));
+    }
+    if keep > 0 {
+        let _ = fs::write(path, &text[keep..]);
+    }
 }
 
 fn append(path: &Path) -> Option<File> {

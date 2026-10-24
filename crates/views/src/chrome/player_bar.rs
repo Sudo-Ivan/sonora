@@ -10,15 +10,15 @@ use gpui::{
 use gpui::{Window, div, px};
 use i18n::t;
 use input::{ToggleFullscreen, ToggleLyrics, ToggleQueue};
-use state::{AppSettings, Playback, Queue, SideTab, Sonora};
+use state::{AppSettings, Playback, PlayerBarLayout, Queue, SideTab, Sonora};
 use ui::{
     Artwork, Button, ExplicitBadge, InlineLink, InlineLinks, Popup, Room, Scrollbar, Scrubber,
     ScrubberState, clock, tabular,
 };
 
-use crate::chrome::SidebarRight;
+use crate::chrome::{Chrome, SidebarRight};
 use crate::shared::menus::ItemMenu;
-use crate::shared::transport::{NOTCH, like, moved, percent, transport, volume_icon};
+use crate::shared::transport::{NOTCH, fraction, like, moved, percent, transport, volume_icon};
 
 const SEEK_MAX: f32 = 560.;
 const VOLUME_WIDTH: f32 = 110.;
@@ -82,6 +82,15 @@ impl PlayerBar {
         cx.notify();
     }
 
+    /// Opens the track menu on whatever is playing when the click lands, so a render does not
+    /// have to hold a copy of the track for a menu that is rarely asked for.
+    fn open_playing_menu(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(track) = self.playback.read(cx).shown_track(cx) else {
+            return;
+        };
+        self.open_context_menu(track, position, cx);
+    }
+
     fn commit_seek(&mut self, cx: &mut Context<Self>) {
         let Some(fraction) = self.pending.take() else {
             return;
@@ -118,7 +127,7 @@ impl PlayerBar {
             true => NOTCH,
             false => -NOTCH,
         };
-        let level = (self.playback.read(cx).volume() + notch).clamp(0., 1.);
+        let level = (self.playback.read(cx).shown_volume(cx) + notch).clamp(0., 1.);
         self.muted = None;
         self.playback
             .update(cx, |playback, cx| playback.set_volume(level, cx));
@@ -127,7 +136,7 @@ impl PlayerBar {
     fn sound(&self, width: Pixels, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let empty = theme.muted_foreground.opacity(0.3);
-        let level = self.playback.read(cx).volume();
+        let level = self.playback.read(cx).shown_volume(cx);
         let showing = self.over_volume.is_some() || self.volume_held;
         let bubble = showing.then(|| (level, percent(level)));
         let restore = self.muted.unwrap_or(0.7);
@@ -239,135 +248,196 @@ impl PlayerBar {
             .on_click(|_, window, cx| window.dispatch_action(Box::new(ToggleFullscreen), cx))
     }
 
-    fn now_playing(&self, room: bool, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = cx.theme();
-        let muted = theme.muted_foreground;
-        let artwork = ui::snapped(theme.metrics.row, window);
-        let artists = theme.text(ui::Text::Small);
-        let track = self.playback.read(cx).track().cloned();
-        let cover = track.as_ref().and_then(|track| track.cover.clone());
-        let explicit = track.as_ref().is_some_and(|track| track.explicit);
-        let like = like(track.clone(), cx);
-        // The provider chip only makes sense with more than one source live; a single
-        // provider's name on every track is noise.
-        let source = {
-            let session = Sonora::global(cx).session.read(cx);
-            (session.active_slugs().len() > 1)
-                .then(|| {
-                    let id = track.as_ref()?.id.as_deref()?;
-                    Some((session.slug_for(id)?, session.name_for(id)?))
-                })
-                .flatten()
-        };
-
+    fn now_playing(&self, room: bool, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
         div()
             .flex()
             .items_center()
             .gap_3()
             .flex_1()
             .min_w_0()
-            .child(
-                div()
-                    .id("now-playing-artwork")
-                    .when_some(
-                        track.as_ref().and_then(|track| track.album_id.clone()),
-                        |this, album| this.link(Destination::Album(album.into())),
-                    )
-                    .when_some(track.clone(), |this, context| {
-                        this.on_mouse_down(
-                            MouseButton::Right,
-                            cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                window.prevent_default();
-                                this.open_context_menu(context.clone(), event.position, cx);
-                            }),
-                        )
-                    })
-                    .child(Artwork::new(cover).size(artwork)),
+            .child(self.artwork(window, cx))
+            .when(room, |this| this.child(self.track_details(false, cx)))
+    }
+
+    /// The playing cover keeps its album link and context menu in every layout.
+    fn artwork(&self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let layout = self.settings.read(cx).player_bar_layout();
+        let artwork = ui::snapped(
+            match layout == PlayerBarLayout::Compact && !Self::stacked(window, layout) {
+                true => theme.metrics.thumb,
+                false => theme.metrics.row,
+            },
+            window,
+        );
+        let shown = self.playback.read(cx).shown_track(cx);
+        let track = shown.as_ref();
+        let cover = track.and_then(|track| track.cover.clone());
+        div()
+            .id("now-playing-artwork")
+            .when_some(
+                track.and_then(|track| track.album_id.clone()),
+                |this, album| this.link(Destination::Album(album.into())),
             )
-            .when(room, |this| {
-                this.child(
+            .when(track.is_some(), |this| {
+                this.on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        this.open_playing_menu(event.position, cx);
+                    }),
+                )
+            })
+            .child(Artwork::new(cover).size(artwork))
+            .flex_none()
+    }
+
+    /// Track and artist links, explicit badge and favorite action, optionally centered without
+    /// moving the cover or transport with them.
+    fn track_details(&self, centered: bool, cx: &mut Context<Self>) -> gpui::Div {
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        let artists = theme.text(ui::Text::Small);
+        let shown = self.playback.read(cx).shown_track(cx);
+        let track = shown.as_ref();
+        let explicit = track.is_some_and(|track| track.explicit);
+        let title = match track {
+            Some(track) => div()
+                .id("now-playing-track")
+                .when_some(track.album_id.clone(), |this, album_id| {
+                    this.hover(|style| style.underline())
+                        .link(Destination::Album(album_id.into()))
+                })
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        this.open_playing_menu(event.position, cx);
+                    }),
+                )
+                .child(SharedString::from(track.name.clone()))
+                .min_w_0()
+                .truncate(),
+            None => div()
+                .id("now-playing-album")
+                .child(t!("player-nothing-playing"))
+                .min_w_0()
+                .text_color(muted)
+                .truncate(),
+        };
+        let actions = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .when(explicit, |this| {
+                this.child(div().flex_none().child(ExplicitBadge::new()))
+            })
+            .child(like(track, &self.playback, cx));
+        let headline = match centered {
+            true => {
+                // Equal clearance on both sides keeps the title itself centered. Actions sit
+                // outside its measured width and remain reachable even for a truncated title.
+                let clearance = theme.metrics.control_small
+                    * match explicit {
+                        true => 2.,
+                        false => 1.,
+                    }
+                    + theme.metrics.pad;
+                div().w_full().flex().justify_center().px(clearance).child(
                     div()
+                        .relative()
                         .flex()
-                        .flex_col()
-                        .justify_center()
-                        .flex_1()
+                        .items_center()
                         .min_w_0()
+                        .min_h(theme.text(ui::Text::Body) * ui::LEADING)
+                        .child(title)
                         .child(
-                            div()
-                                .flex()
-                                .min_w_0()
-                                .items_center()
-                                .gap_1()
-                                .child(match &track {
-                                    Some(track) => {
-                                        let context_track = track.clone();
-                                        div()
-                                            .id("now-playing-track")
-                                            .when_some(track.album_id.clone(), |this, album_id| {
-                                                this.hover(|style| style.underline())
-                                                    .link(Destination::Album(album_id.into()))
-                                            })
-                                            .on_mouse_down(
-                                                MouseButton::Right,
-                                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                                    window.prevent_default();
-                                                    this.open_context_menu(
-                                                        context_track.clone(),
-                                                        event.position,
-                                                        cx,
-                                                    );
-                                                }),
-                                            )
-                                            .child(SharedString::from(track.name.clone()))
-                                            .min_w_0()
-                                            .truncate()
-                                    }
-                                    None => div()
-                                        .id("now-playing-album")
-                                        .child(t!("player-nothing-playing"))
-                                        .min_w_0()
-                                        .text_color(muted)
-                                        .truncate(),
-                                })
-                                .when(explicit, |this| {
-                                    this.child(div().flex_none().child(ExplicitBadge::new()))
-                                })
-                                .when_some(source, |this, (slug, name)| {
-                                    this.child(div().flex_none().child(
-                                        crate::shared::provider_chip(slug, name, cx),
-                                    ))
-                                })
-                                .child(like),
-                        )
-                        .when_some(track.clone(), |this, track| {
-                            this.child(
-                                InlineLinks::new(
-                                    "now-playing-artist",
-                                    track.artist_refs.into_iter().map(|artist| {
-                                        InlineLink::new(artist.name, artist.id.map(Into::into))
-                                    }),
-                                    track.artists,
-                                    muted,
-                                )
-                                .text_size(artists)
-                                .truncate()
-                                .on_click(|id, cx| {
-                                    navigate(Destination::Artist(id), cx);
-                                }),
-                            )
+                            actions
+                                .absolute()
+                                .left(gpui::relative(1.))
+                                .ml(theme.metrics.pad * 0.5)
+                                .top_0()
+                                .bottom_0(),
+                        ),
+                )
+            }
+            false => div()
+                .w_full()
+                .flex()
+                .min_w_0()
+                .items_center()
+                .gap_1()
+                .child(title)
+                .child(actions),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .when(centered, |this| {
+                this.items_center().line_height(gpui::relative(ui::LEADING))
+            })
+            .justify_center()
+            .flex_1()
+            .min_w_0()
+            .child(headline)
+            .when_some(track, |this, track| {
+                this.child(
+                    InlineLinks::new(
+                        "now-playing-artist",
+                        track.artist_refs.iter().map(|artist| {
+                            InlineLink::new(artist.name.clone(), artist.id.clone().map(Into::into))
                         }),
+                        track.artists.clone(),
+                        muted,
+                    )
+                    .text_size(artists)
+                    .when(centered, |this| this.justify_center())
+                    .truncate()
+                    .on_click(|id, cx| {
+                        navigate(Destination::Artist(id), cx);
+                    }),
                 )
             })
     }
 }
 
 impl PlayerBar {
+    /// Centered needs room for its three columns; smaller windows keep every control reachable
+    /// in the shared responsive layout. Only the whole window's width determines the choice.
+    fn stacked(window: &Window, layout: PlayerBarLayout) -> bool {
+        let room = match layout {
+            PlayerBarLayout::Centered => Room::Wide,
+            _ => Room::Roomy,
+        };
+        !Chrome::window_room(window).fits(room)
+    }
+
+    /// The volume slider keeps its full width until the window is as narrow as the one that
+    /// stacks the classic bar, so a layout that stacks sooner still matches it.
+    fn volume_width(window: &Window) -> Pixels {
+        match Chrome::window_room(window).fits(Room::Roomy) {
+            true => px(VOLUME_WIDTH),
+            false => px(VOLUME_TIGHT),
+        }
+    }
+
+    /// How much of the content's bottom edge the strip above the bar covers right now, which
+    /// is nothing while no Jam or other device is being shown.
+    pub(crate) fn strip(_playback: &Playback, _cx: &gpui::App) -> Pixels {
+        Pixels::ZERO
+    }
+
+    /// The height the workspace reserves, shared by the overlay's bottom scroll clearance.
     pub(crate) fn height(window: &Window, cx: &gpui::App) -> Pixels {
         let theme = *cx.theme();
-        match !Room::of(window.viewport_size().width).fits(Room::Roomy) {
-            true => ui::snapped(theme.metrics.player_bar + theme.metrics.pad * 3., window),
-            false => ui::snapped(theme.metrics.player_bar, window),
-        }
+        let layout = Sonora::global(cx).settings.read(cx).player_bar_layout();
+        let height = match (Self::stacked(window, layout), layout) {
+            (true, _) => theme.metrics.player_bar + theme.metrics.pad * 3.,
+            (false, PlayerBarLayout::Compact) => theme.metrics.row + theme.metrics.pad * 2.,
+            _ => theme.metrics.player_bar,
+        };
+        ui::snapped(height, window)
     }
 }
 
@@ -376,10 +446,14 @@ impl Render for PlayerBar {
         let theme = *cx.theme();
         let muted = theme.muted_foreground;
         let empty = muted.opacity(0.3);
-        let span = Room::of(window.viewport_size().width);
-        let stacked = !span.fits(Room::Roomy);
+        let span = Chrome::window_room(window);
+        let layout = self.settings.read(cx).player_bar_layout();
+        let stacked = Self::stacked(window, layout);
+        let transparent = self.settings.read(cx).player_bar_translucent();
         let height = Self::height(window, cx);
         let clock_text = theme.text(ui::Text::Tiny);
+        // Equal wings keep the title centered while reserving the original volume slider width.
+        let centered_wing = theme.metrics.control * 4. + px(VOLUME_WIDTH) + theme.metrics.pad * 3.;
 
         let show_track = span.fits(Room::Snug);
         let sides = match SidebarRight::available(window) {
@@ -388,13 +462,9 @@ impl Render for PlayerBar {
         };
 
         let playback = self.playback.read(cx);
-        let seekable = playback.track().is_some();
-        let progress = self.pending.unwrap_or_else(|| playback.progress());
-        let elapsed = playback.position();
-        let total = playback
-            .track()
-            .map(|track| track.duration)
-            .unwrap_or(Duration::ZERO);
+        let seekable = playback.shown_track(cx).is_some();
+        let (elapsed, total) = playback.shown_time(cx);
+        let progress = self.pending.unwrap_or_else(|| fraction(elapsed, total));
         let clock_width = clock_text
             * match total.as_secs() >= 3600 {
                 true => CLOCK_LONG,
@@ -443,7 +513,7 @@ impl Render for PlayerBar {
             .into_any_element();
 
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        let radius = crate::chrome::window_radius(self.settings.read(cx), cx);
+        let radius = crate::chrome::window_radius(self.settings.read(cx), cx, window);
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
         let radius: Option<Pixels> = None;
 
@@ -455,9 +525,14 @@ impl Render for PlayerBar {
             .px_5()
             .when(stacked, |this| this.py_2())
             .when_some(radius, |this, radius| this.rounded_b(radius))
-            .when(!theme.transparent, |this| this.bg(theme.secondary))
+            .when_else(
+                transparent,
+                |this| ui::bar_surface(this, cx).text_color(theme.popover_foreground),
+                |this| this.when(!theme.transparent, |this| this.bg(theme.secondary)),
+            )
             .border_t_1()
             .border_color(theme.border)
+            .occlude()
             .on_mouse_move(cx.listener(Self::hover));
 
         let context_menu = self.context_menu.clone().map(|(track, position)| {
@@ -469,8 +544,8 @@ impl Render for PlayerBar {
             ))
         });
 
-        let content = match stacked {
-            true => base
+        let content = match (stacked, layout) {
+            (true, _) => base
                 .flex_col()
                 .justify_center()
                 .gap_2()
@@ -491,10 +566,62 @@ impl Render for PlayerBar {
                         .w_full()
                         .child(div().flex_1().min_w_0().child(seek))
                         .children(sides)
-                        .child(self.sound(px(VOLUME_TIGHT), cx))
+                        .child(self.sound(Self::volume_width(window), cx))
                         .child(self.fullscreen_button()),
                 ),
-            false => base
+            (false, PlayerBarLayout::Centered) => base
+                .items_center()
+                .py(theme.metrics.pad)
+                .gap_3()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(centered_wing)
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .child(self.artwork(window, cx))
+                        .child(transport(&self.playback, &self.queue, false, cx)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .max_w(px(SEEK_MAX))
+                        .h_full()
+                        .flex()
+                        .flex_col()
+                        .justify_center()
+                        .child(self.track_details(true, cx).w_full())
+                        .child(div().flex_none().w_full().child(seek)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(centered_wing)
+                        .h_full()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap_2()
+                        .children(sides)
+                        .child(self.sound(px(VOLUME_WIDTH), cx))
+                        .child(self.fullscreen_button()),
+                ),
+            (false, PlayerBarLayout::Compact) => base
+                .items_center()
+                .gap_3()
+                .child(
+                    self.now_playing(show_track, window, cx)
+                        .max_w(theme.metrics.cover * 1.6),
+                )
+                .child(transport(&self.playback, &self.queue, false, cx))
+                .child(div().flex_1().min_w_0().child(seek))
+                .children(sides)
+                .child(self.sound(px(VOLUME_WIDTH), cx))
+                .child(self.fullscreen_button()),
+            _ => base
                 .items_center()
                 .gap_4()
                 .child(self.now_playing(show_track, window, cx))
@@ -516,14 +643,16 @@ impl Render for PlayerBar {
                         .items_center()
                         .justify_end()
                         .gap_2()
+                        // never narrower than its buttons, or they spill over the seek bar's clock
                         .flex_1()
-                        .min_w_0()
                         .children(sides)
                         .child(self.sound(px(VOLUME_WIDTH), cx))
                         .child(self.fullscreen_button()),
                 ),
         };
 
-        content.when_some(context_menu, |this, menu| this.child(menu))
+        content
+            .relative()
+            .when_some(context_menu, |this, menu| this.child(menu))
     }
 }

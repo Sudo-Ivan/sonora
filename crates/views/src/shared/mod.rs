@@ -5,9 +5,12 @@ pub(crate) mod ambient;
 pub(crate) mod cards;
 pub(crate) mod cells;
 pub(crate) mod confirm;
+pub(crate) mod device_code;
+pub(crate) mod equalizer;
 pub(crate) mod hero;
 pub(crate) mod local;
 pub(crate) mod menus;
+pub(crate) mod nav;
 pub(crate) mod page;
 pub(crate) mod picks;
 pub(crate) mod pins;
@@ -21,19 +24,20 @@ pub(crate) mod track_card;
 pub(crate) mod tracks;
 pub(crate) mod transport;
 pub(crate) mod trouble;
-pub(crate) mod veil;
 pub(crate) mod visualizer;
 
-pub(crate) fn effects() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("SONORA_BLUR").as_deref() != Ok("0"))
-}
+pub(crate) use ui::effects;
+
+/// The brand colours of the providers' marks.
+const DEEZER: u32 = 0xa238ff;
+const SUBSONIC: u32 = 0xffa31a;
 
 pub(crate) fn provider_logo(slug: &str) -> &'static str {
     match slug {
         "subsonic" => "icons/subsonic.svg",
         "deezer" => "icons/deezer.svg",
         "local" => "icons/file-music.svg",
+        "tidal" => "icons/tidal.svg",
         _ => "icons/music.svg",
     }
 }
@@ -64,7 +68,16 @@ pub(crate) fn provider_chip(slug: &str, name: &str, cx: &gpui::App) -> gpui::Any
             gpui::div()
                 .text_size(theme.text(ui::Text::Tiny))
                 .text_color(theme.muted_foreground)
-                .child(gpui::SharedString::from(name.to_owned())),
+                .child(name.to_owned()),
         )
         .into_any_element()
+}
+
+/// The brand colour of the provider `slug`'s mark.
+pub(crate) fn provider_brand(slug: &str, cx: &gpui::App) -> gpui::Hsla {
+    match slug {
+        "deezer" => gpui::rgb(DEEZER).into(),
+        "subsonic" => gpui::rgb(SUBSONIC).into(),
+        _ => ui::ActiveTheme::theme(cx).foreground,
+    }
 }

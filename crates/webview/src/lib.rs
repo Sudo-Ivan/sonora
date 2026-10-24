@@ -53,8 +53,19 @@ pub struct Target {
     pub proof: Vec<String>,
     pub title: String,
     /// A user agent the window presents instead of the backend's default, when the provider
-    /// needs one that matches the engine the backend drives.
+    /// needs one that matches the engine the backend drives. A scripted window without one
+    /// presents the engine's own agent.
     pub agent: Option<String>,
+    /// Javascript to run in every page the window loads, before the page's own scripts. A window
+    /// with one is a scripted window and is never shown.
+    pub script: Option<String>,
+}
+
+impl Target {
+    /// Whether this target is a background page rather than a window the user works in.
+    pub(crate) fn scripted(&self) -> bool {
+        self.script.is_some()
+    }
 }
 
 /// One cookie as the page holds it. `domain` keeps the leading dot when the browser stored one.
@@ -115,6 +126,28 @@ impl Page {
         })
     }
 
+    /// Reads the cookies of a scripted page and leaves it open, so one page can answer many times.
+    /// Every read that finishes comes back as `Cookies` whatever it holds, and `Pending` means a
+    /// read is still out. Call it every few hundred milliseconds or faster.
+    pub fn peek(&mut self) -> Poll {
+        if self.window.closed() {
+            return Poll::Closed;
+        }
+        match self.window.fetch() {
+            Some(cookies) => Poll::Cookies(header(&cookies, &self.target.domain)),
+            None => Poll::Pending,
+        }
+    }
+
+    /// Runs `script` in the page that is loaded now, in the same world as the target's own script.
+    /// Nothing comes back, so a script that has an answer leaves it in a cookie for [`peek`]. A
+    /// page that has not finished setting up yet drops the call.
+    ///
+    /// [`peek`]: Self::peek
+    pub fn run(&self, script: &str) {
+        self.window.run(script);
+    }
+
     /// Checks where the window is. Call it every few hundred milliseconds until it stops answering
     /// `Pending`; the cookies come back once, and the window closes on that poll.
     pub fn poll(&mut self) -> Poll {
@@ -141,7 +174,7 @@ impl Page {
     /// once. Any page of the domain counts, not only the landing: a skipped hand-off can end on
     /// an error page of the provider's just as well.
     fn retry(&mut self) {
-        if self.retried {
+        if self.retried || self.target.scripted() {
             return;
         }
         let Some(host) = self.window.host() else {

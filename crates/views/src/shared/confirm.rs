@@ -1,11 +1,11 @@
 use gpui::prelude::*;
-use gpui::{App, Context, Entity, FocusHandle, Global, Render, Window, div};
+use gpui::{App, Context, Entity, FocusHandle, Global, Render, SharedString, Window, div};
 use i18n::t;
-use music::{Album, SavedArtist, Shape, Track};
-use state::{Detail, History, Io, Outcome, Shelf, Sonora, Toasts};
+use music::{Album, SavedArtist, Track};
+use state::{Detail, History, Io, Outcome, Shelf, Sonora, Toasts, equalizer_profile_label};
 use ui::{Button, Dismiss, FORM_CONTEXT, Modal, Submit};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum Kind {
     LibrarySongs(usize),
     PlaylistSongs(usize),
@@ -14,6 +14,10 @@ pub(crate) enum Kind {
     Artists(usize),
     Playlists(usize),
     DeleteTrackFiles(usize),
+    /// Every download, of every provider.
+    Downloads,
+    /// An equalizer profile, by its stored name.
+    EqualizerProfile(SharedString),
 }
 
 impl Kind {
@@ -22,6 +26,8 @@ impl Kind {
             Self::PlaylistSongs(_) => t!("confirm-remove-playlist-title"),
             Self::History(_) => t!("confirm-remove-history-title"),
             Self::DeleteTrackFiles(_) => t!("confirm-delete-track-files-title"),
+            Self::Downloads => t!("confirm-remove-downloads-title"),
+            Self::EqualizerProfile(_) => t!("equalizer-delete"),
             _ => t!("confirm-remove-library-title"),
         }
     }
@@ -35,11 +41,19 @@ impl Kind {
             Self::Artists(count) => t!("confirm-remove-artists", count = count),
             Self::Playlists(count) => t!("confirm-remove-playlists", count = count),
             Self::DeleteTrackFiles(count) => t!("confirm-delete-track-files", count = count),
+            Self::Downloads => t!("confirm-remove-downloads"),
+            Self::EqualizerProfile(ref name) => {
+                let name = equalizer_profile_label(name);
+                t!("equalizer-delete-confirm", name = &name)
+            }
         }
     }
 
     fn action(&self) -> gpui::SharedString {
-        t!("common-delete")
+        match self {
+            Self::Downloads => t!("settings-downloads-remove"),
+            _ => t!("common-delete"),
+        }
     }
 }
 
@@ -79,7 +93,11 @@ impl Confirm {
     /// `Shape::Catalog` shelf the favorites sit over a library that stays put; on a
     /// `Shape::Saved` one the heart is the library itself, and the question stands.
     pub(crate) fn unstarring(id: &str, cx: &App) -> bool {
-        Sonora::global(cx).library.read(cx).shape(Shelf::of(id)) == Shape::Catalog
+        Sonora::global(cx)
+            .library
+            .read(cx)
+            .shape(Shelf::of(id))
+            .is_catalog()
     }
 
     pub fn ask(kind: Kind, apply: impl FnOnce(&mut App) + 'static, cx: &mut App) {
@@ -196,9 +214,7 @@ impl Confirm {
             move |cx| {
                 let library = Sonora::global(cx).library.clone();
                 library.update(cx, |library, cx| {
-                    for id in ids {
-                        library.remove_playlist_from_library(id, cx);
-                    }
+                    library.remove_playlists_from_library(ids, cx)
                 });
             },
             cx,

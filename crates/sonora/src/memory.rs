@@ -3,26 +3,11 @@ use std::time::{Duration, Instant};
 use gpui::App;
 use state::Sonora;
 
-/// How often freed heap pages go back to the kernel. The first time comes after half of it, while
-/// startup is still settling.
-const INTERVAL: Duration = Duration::from_secs(10);
-/// When clean file pages are shed after launch: once the renderer and drivers are up, again once
-/// the first screen has loaded, and once more after the first minute.
-const FIRST_SHEDS: [Duration; 3] = [
-    Duration::from_secs(5),
-    Duration::from_secs(15),
-    Duration::from_secs(60),
-];
-/// How often clean file pages are shed after the first time.
-const SHED_EVERY: Duration = Duration::from_secs(600);
-
-/// Caps glibc at two malloc arenas and sends every block of 256 KiB or more straight to mmap.
-/// Without it each of the many worker threads keeps its own fragmented arena, and freed decode
-/// buffers stay resident. Call it first thing in `main`, before any thread exists.
+/// Malloc's mmap and trim thresholds, tuned once at startup so the heap hands pages back
+/// eagerly instead of growing.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 pub fn tune() {
     unsafe {
-        libc::mallopt(libc::M_ARENA_MAX, 2);
         libc::mallopt(libc::M_MMAP_THRESHOLD, 256 * 1024);
         libc::mallopt(libc::M_TRIM_THRESHOLD, 1024 * 1024);
     }
@@ -47,6 +32,19 @@ pub fn cap_pools() {
     }
 }
 
+/// How often freed heap pages go back to the kernel. The first time comes after half of it, while
+/// startup is still settling.
+const INTERVAL: Duration = Duration::from_secs(10);
+/// When clean file pages are shed after launch: once the renderer and drivers are up, again once
+/// the first screen has loaded, and once more after the first minute.
+const FIRST_SHEDS: [Duration; 3] = [
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(60),
+];
+/// How often clean file pages are shed once the early ones are done.
+const SHED_EVERY: Duration = Duration::from_secs(30);
+
 /// Resident bytes above which a tick acts rather than trims: the artwork cache is squeezed
 /// to its small resident set and the heap handed back to the allocator. Well past a healthy
 /// session's working set, so the flush only runs when something is genuinely bloated.
@@ -57,6 +55,9 @@ const PRESSURE: usize = 768 * 1024 * 1024;
 /// every page it returns faults back in on the next allocation, so a trim under an animating
 /// window drops frames. Work skipped while the window is watched waits for the next quiet tick.
 pub fn watch(cx: &mut App) {
+    if !log::log_enabled!(log::Level::Debug) {
+        return;
+    }
     cx.spawn(async move |cx| {
         let started = Instant::now();
         let mut sheds = FIRST_SHEDS.into_iter();

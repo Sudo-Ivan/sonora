@@ -1,6 +1,18 @@
 <div align="center">
 
-# Sonora
+<img src="./.github/readme-icon.svg" alt="" width="60" height="60">
+
+<h1>Sonora</h1>
+
+<p align="center">
+  <a href="https://sonorahq.org/changelog">Changelog</a>
+  ·
+  <a href="https://sonorahq.org/docs">Docs</a>
+  ·
+  <a href="https://sonorahq.org/docs/roadmap">Roadmap</a>
+  ·
+  <a href="https://sonorahq.org/faq">FAQ</a>
+</p>
 
 [![Build](https://img.shields.io/github/actions/workflow/status/Sudo-Ivan/sonora/ci.yml?style=flat-square&label=build)](https://github.com/Sudo-Ivan/sonora/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/Sudo-Ivan/sonora?style=flat-square&label=license)](./COPYING)
@@ -46,15 +58,12 @@ A fork of [sonorahq/sonora](https://github.com/sonorahq/sonora); see [FORK.md](F
 
 ## Features
 
-* **Deezer, Subsonic/Navidrome** and local playback
+* **Deezer, Tidal, Subsonic/Navidrome** and local playback
 * Gapless playback, audio normalization, shuffle, sleep timer
 * Synced/karaoke lyrics, background vocals, and romanization
 * Scrobbling with LastFM, ListenBrainz, LibreFM, and Maloja
 * Self-hosted servers work over HTTPS with self-signed certificates
 * Themes, fonts, icons, transparency, blur, and window styling
-* Native file opening
-* macOS, Windows, Linux, and (probably) FreeBSD support
-* No telemetry
 
 ## Installation
 
@@ -68,6 +77,24 @@ xattr -dr com.apple.quarantine /Applications/Sonora.app
 ```
 
 ### Linux
+
+#### Arch
+
+Install from the AUR with your AUR helper of choice:
+
+```sh
+yay -S sonora-bin
+```
+
+`sonora-bin` installs the prebuilt release binary. `sonora` builds the same version from source
+instead, which takes a while on a Rust and GPUI tree but links against your own system libraries:
+
+```sh
+yay -S sonora
+```
+
+Either `pipewire-alsa` or `pulseaudio-alsa` is required, matching your sound server. Sonora
+warns you at startup when the one your sound server needs is missing.
 
 #### Flatpak
 
@@ -96,17 +123,21 @@ for you.
 
 ### Nix
 
-The flake packages the latest tagged release binary or builds from source if unavailable for your platform.
-
 ```nix
 inputs.sonora.url = "github:Sudo-Ivan/sonora";
 ```
 
 ```text
-inputs.sonora.packages.${system}.default
-inputs.sonora.packages.${system}.sonora (build from source)
-inputs.sonora.packages.${system}.sonora-bin (prebuilt, if available)
+inputs.sonora.packages.${system}.default     (prebuilt where available, else from source)
+inputs.sonora.packages.${system}.sonora      (same as default)
+inputs.sonora.packages.${system}.sonora-bin  (prebuilt, x86_64-linux, aarch64-linux, aarch64-darwin)
+inputs.sonora.packages.${system}.sonora-src  (always built from source)
 ```
+
+The prebuilt package downloads the latest tagged release. `sonora-src` compiles whatever
+revision of the flake you point it at, so pin the input to a tag such as
+`github:sonorahq/sonora/v0.43.0` to build a release. Building from source on macOS needs Xcode
+added to the Nix store, because the shaders compile with Apple's Metal compiler.
 
 You can set configuration options via the included Home Manager module under `programs.sonora`:
 
@@ -164,20 +195,21 @@ Releases are published once and never modified afterwards.
 
 | Language | Translated | Coverage |
 | --- | --- | --- |
-| English (`en-US`) | 722/722 | 100% |
-| Deutsch (`de`) | 604/722 | 84% |
-| Español (`es`) | 666/722 | 92% |
-| Français (`fr`) | 603/722 | 84% |
-| Italiano (`it`) | 581/722 | 80% |
-| Bahasa Indonesia (`id`) | 581/722 | 80% |
-| 日本語 (`ja`) | 581/722 | 80% |
-| Русский (`ru`) | 687/722 | 95% |
-| Українська (`uk`) | 687/722 | 95% |
-| Polski (`pl`) | 687/722 | 95% |
-| Português (Brasil) (`pt-BR`) | 581/722 | 80% |
-| 简体中文 (`zh-CN`) | 581/722 | 80% |
-| Türkçe (`tr`) | 581/722 | 80% |
-| Shqip (`sq`) | 690/722 | 96% |
+| English (`en-US`) | 1067/1067 | 100% |
+| Deutsch (`de`) | 1011/1067 | 95% |
+| Español (`es`) | 1011/1067 | 95% |
+| Français (`fr`) | 1011/1067 | 95% |
+| Italiano (`it`) | 1011/1067 | 95% |
+| Bahasa Indonesia (`id`) | 1011/1067 | 95% |
+| 日本語 (`ja`) | 1011/1067 | 95% |
+| Русский (`ru`) | 1011/1067 | 95% |
+| Українська (`uk`) | 1011/1067 | 95% |
+| Polski (`pl`) | 1011/1067 | 95% |
+| Čeština (`cs`) | 1012/1067 | 95% |
+| Português (Brasil) (`pt-BR`) | 1011/1067 | 95% |
+| 简体中文 (`zh-CN`) | 1011/1067 | 95% |
+| Türkçe (`tr`) | 1011/1067 | 95% |
+| Shqip (`sq`) | 1012/1067 | 95% |
 
 <!-- i18n:end -->
 

@@ -4,6 +4,7 @@
 mod auth;
 mod client;
 mod decrypt;
+mod links;
 mod playback;
 mod wire;
 
@@ -14,8 +15,8 @@ use async_trait::async_trait;
 
 use crate::deezer::playback::Factory;
 use crate::{
-    Capabilities, InputSource, MusicApi as _, MusicProvider, PromptSink, ProviderSession, Shape,
-    SignIn, SignInPrompt, WebSignIn,
+    Capabilities, InputSource, MusicApi as _, MusicProvider, PlaybackFactory, PromptSink,
+    ProviderSession, Shape, SignIn, SignInPrompt, WebSignIn,
 };
 
 pub use auth::arl;
@@ -78,6 +79,7 @@ fn session(client: DeezerClient, profile: crate::UserProfile) -> ProviderSession
         authenticated: true,
         capabilities: Capabilities {
             playcounts: false,
+            qualities: client::QUALITIES,
             ..Capabilities::ALL
         },
     }
@@ -99,6 +101,10 @@ impl MusicProvider for DeezerProvider {
         "deezer"
     }
 
+    fn link(&self, link: &str) -> Option<crate::link::Linked> {
+        links::read(link)
+    }
+
     fn reach(&self) -> Option<String> {
         Some("www.deezer.com".to_owned())
     }
@@ -109,6 +115,14 @@ impl MusicProvider for DeezerProvider {
 
     fn stored(&self) -> bool {
         auth::load().is_some()
+    }
+
+    fn offline_playback(&self) -> Option<Arc<dyn PlaybackFactory>> {
+        let remembered = auth::load()?;
+        let client = DeezerClient::offline(&remembered.arl)
+            .inspect_err(|error| log::warn!("deezer: cannot build an offline client: {error:#}"))
+            .ok()?;
+        Some(Arc::new(Factory::new(client)))
     }
 
     async fn restore(&self) -> Result<Option<ProviderSession>> {

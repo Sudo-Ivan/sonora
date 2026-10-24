@@ -1,4 +1,6 @@
 mod aside;
+mod notice;
+mod output_picker;
 mod player_bar;
 mod sidebar_left;
 mod sidebar_right;
@@ -6,16 +8,18 @@ mod title_bar;
 mod toasts;
 mod toolbar;
 pub(crate) mod tools;
-mod update_notice;
 
-pub(crate) use aside::Aside;
+pub(crate) use aside::{Aside, VerseLook, verse, verse_sizes};
+pub(crate) use notice::AppNotice;
+pub(crate) use output_picker::OutputPicker;
 pub(crate) use player_bar::PlayerBar;
 pub(crate) use sidebar_left::SidebarLeft;
 pub(crate) use sidebar_right::SidebarRight;
-pub(crate) use title_bar::{TitleBar, TitleBarEvent, TitleBarOptions};
-pub(crate) use toasts::ToastStack;
+#[cfg(target_os = "macos")]
+pub use title_bar::traffic_lights;
+pub(crate) use title_bar::{Busy, TitleBar, TitleBarEvent, TitleBarOptions};
+pub use toasts::ToastStack;
 pub(crate) use toolbar::{Searchable, Toolbar, Tooled};
-pub(crate) use update_notice::UpdateNotice;
 
 use gpui::prelude::*;
 use gpui::{App, Div, Entity, Global, Pixels, Window, div};
@@ -28,8 +32,8 @@ use ui::{ActiveTheme as _, MIN_CONTENT, Room, eyebrow};
 /// height, since GPUI clamps a quad's radius to half its shorter side and the title bar would
 /// otherwise draw a tighter corner than the rest of the chrome.
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-pub(crate) fn window_radius(settings: &AppSettings, cx: &App) -> Option<Pixels> {
-    if settings.server_side_decorations() {
+pub(crate) fn window_radius(settings: &AppSettings, cx: &App, window: &Window) -> Option<Pixels> {
+    if window.is_fullscreen() || settings.server_side_decorations() {
         return None;
     }
     match settings.window_rounding() {
@@ -61,6 +65,8 @@ pub(crate) struct Chrome {
     /// The width the left sidebar leaves free for an open right sidebar, counted even while
     /// the window is too narrow to show it.
     reserved_right: Pixels,
+    /// The part of a page covered by the translucent player bar.
+    player_bottom: Pixels,
 }
 
 struct Installed(Entity<Chrome>);
@@ -81,6 +87,7 @@ impl Chrome {
             sidebar_left: left,
             sidebar_right: right,
             reserved_right,
+            player_bottom: Self::get(cx).player_bottom,
         };
         let chrome = Self::entity(cx);
         chrome.update(cx, |chrome, cx| {
@@ -101,6 +108,22 @@ impl Chrome {
         Self::get(cx).reserved_right
     }
 
+    /// The extra scroll space needed to bring a page's last item above the player bar.
+    pub fn bottom(cx: &App) -> Pixels {
+        Self::get(cx).player_bottom
+    }
+
+    /// Publishes the player bar's overlap after its responsive height has been resolved.
+    pub(crate) fn set_bottom(bottom: Pixels, cx: &mut App) {
+        Self::entity(cx).update(cx, |chrome, cx| {
+            if chrome.player_bottom != bottom {
+                chrome.player_bottom = bottom;
+                cx.notify();
+                cx.refresh_windows();
+            }
+        });
+    }
+
     pub fn content(window: &Window, cx: &App) -> Pixels {
         let chrome = Self::get(cx);
         (window.viewport_size().width - chrome.sidebar_left - chrome.sidebar_right).max(MIN_CONTENT)
@@ -108,5 +131,10 @@ impl Chrome {
 
     pub fn room(window: &Window, cx: &App) -> Room {
         Room::of(Self::content(window, cx))
+    }
+
+    /// Classifies chrome that spans the whole window, including the space under sidebars.
+    pub fn window_room(window: &Window) -> Room {
+        Room::of(window.viewport_size().width)
     }
 }

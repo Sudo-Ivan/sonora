@@ -58,7 +58,7 @@ library-part-not-loaded = Ta część biblioteki się nie wczytała
 library-local-unconfigured = Skonfiguruj lokalną bibliotekę
 
 # app menu
-app-refresh-library = Odśwież bibliotekę
+app-refresh = Odśwież
 app-sign-out = Wyloguj się
 app-quit = Zakończ
 app-settings = Ustawienia…
@@ -106,6 +106,7 @@ menu-add-tracks-to-playlist = { $count ->
 menu-new-playlist = Nowa playlista
 menu-edit-tags = Edytuj tagi
 menu-no-playlists = Brak playlist
+menu-search-playlists = Szukaj playlisty
 menu-add-to-library = Dodaj do ulubionych
 menu-add-tracks-to-library = { $count ->
     [one] Dodaj { $count } utwór do ulubionych
@@ -118,20 +119,33 @@ menu-remove-tracks-from-library = { $count ->
     [few] Usuń { $count } utwory z ulubionych
    *[other] Usuń { $count } utworów z ulubionych
 }
-
 menu-remove-from-playlist = Usuń z playlisty
 menu-remove-tracks-from-playlist = { $count ->
     [one] Usuń { $count } utwór z playlisty
     [few] Usuń { $count } utwory z playlisty
    *[other] Usuń { $count } utworów z playlisty
 }
-
 menu-remove-from-history = Usuń z historii
 menu-remove-tracks-from-history = { $count ->
     [one] Usuń { $count } utwór z historii
     [few] Usuń { $count } utwory z historii
    *[other] Usuń { $count } utworów z historii
 }
+menu-delete-track-file = Usuń plik utworu
+menu-delete-track-files = Usuń pliki utworów ({ $count })
+menu-download = Pobierz
+menu-download-tracks = { $count ->
+    [one] Pobierz { $count } utwór
+    [few] Pobierz { $count } utwory
+   *[other] Pobierz { $count } utworów
+}
+menu-remove-download = Usuń z pobranych
+menu-remove-downloads = { $count ->
+    [one] Usuń { $count } utwór z pobranych
+    [few] Usuń { $count } utwory z pobranych
+   *[other] Usuń { $count } utworów z pobranych
+}
+menu-downloading = Pobieranie. Kliknij, aby zatrzymać
 menu-play-next = Odtwórz jako następny
 menu-play-tracks-next = { $count ->
     [one] Odtwórz { $count } utwór jako następny
@@ -224,16 +238,20 @@ confirm-remove-playlists = { $count ->
     [few] Usunąć { $count } playlisty z biblioteki?
    *[other] Usunąć { $count } playlist z biblioteki?
 }
+confirm-delete-track-files-title = Usunąć pliki utworów?
+confirm-delete-track-files = Pliki zostaną trwale usunięte z dysku. Nie można tego cofnąć.
 
 # queue panel
 queue-title = Kolejka
 queue-history = Historia
 queue-now-playing = Teraz odtwarzane
 queue-from = Z
+queue-from-radio = Radio { $name }
 queue-next-in-queue = Następne w kolejce
 queue-up-next = Następne
 queue-reset = Resetuj
 queue-clear = Wyczyść
+queue-added-by = Dodane przez { $name }
 queue-empty = Twoja kolejka jest pusta
 queue-similar = Podobne utwory
 queue-radio = Automatycznie odtwarzaj podobne utwory
@@ -252,6 +270,40 @@ player-previous = Poprzedni utwór
 player-next = Następny utwór
 player-fullscreen = Pełny ekran
 player-fullscreen-leave = Wyjdź z trybu pełnoekranowego
+player-devices = Urządzenia
+devices-this-computer = Ten komputer
+devices-pause = Wstrzymaj
+devices-resume = Wznów
+devices-jam-join = Dołącz do Jamu…
+devices-jam-join-title = Dołącz do Jamu
+devices-jam-join-detail = Wklej link udostępniony przez znajomego
+devices-jam-paste = Wklej
+devices-jam-link-hint = Link do Jamu
+devices-jam-start = Rozpocznij Jam
+devices-jam-copy = Kopiuj link do Jamu
+devices-jam-code = Kod QR
+devices-jam-code-menu = Pokaż kod QR
+devices-jam-code-title = Zeskanuj, aby dołączyć do Jamu użytkownika { $host }
+devices-jam-code-title-anonymous = Zeskanuj, aby dołączyć do Jamu
+devices-jam-code-close = Zamknij
+devices-jam-leave = Opuść Jam
+devices-jam-end = Zakończ Jam
+devices-jam-banner = W Jamie użytkownika { $host }
+devices-jam-banner-anonymous = W Jamie
+devices-jam-more = +{ $count }
+devices-jam-host = Gospodarz
+devices-jam-you = Ty
+devices-jam-remove = Usuń
+devices-jam-invite-title = Dołączyć do Jamu użytkownika { $host }?
+devices-jam-invite-title-anonymous = Dołączyć do tego Jamu?
+devices-jam-invite-detail = { $count ->
+    [one] { $count } osoba jest już w tym Jamie.
+    [few] { $count } osoby są już w tym Jamie.
+   *[other] { $count } osób jest już w tym Jamie.
+}
+devices-jam-invite-join = Dołącz
+devices-elsewhere-banner = Odtwarzanie na: { $device }
+devices-elsewhere-here = Odtwarzaj tutaj
 fullscreen-artwork = Okładka
 
 # filters
@@ -266,9 +318,10 @@ filter-album = Filtruj utwory albumu
 filter-reset = Wyczyść filtry
 filter-duration = Czas trwania
 filter-year = Rok
-filter-explicit = Tylko z wulgaryzmami
+filter-hide-explicit = Ukryj z wulgaryzmami
 filter-playable = Tylko dostępne
 filter-favorites = Tylko ulubione
+filter-downloaded = Pobrane
 filter-owned = Moje
 
 # view
@@ -344,6 +397,7 @@ artist-appears-on = Występuje w
 album-also-like = Może Ci się spodobać
 album-tab-albums = Albumy
 album-tab-artists = Artyści
+album-label = ℗ { $label }
 
 # user profile page
 user-eyebrow = Profil
@@ -372,6 +426,11 @@ release-meta = { $year } • { $kind }
 # home page
 home-quick-picks = Szybki wybór
 home-quick-picks-empty = Polub kilka utworów, a pojawią się tutaj
+home-recently-added = Ostatnio dodane
+home-playlists = Playlisty
+home-favorite-albums = Ulubione albumy
+home-artists = Wykonawcy
+home-collection-albums = Albumy z Twojej kolekcji
 
 # search page
 search-placeholder = Czego chcesz posłuchać?
@@ -454,6 +513,11 @@ count-tracks =
        *[other] { $count } utworów
     }
 
+# running times
+runtime-seconds = { $seconds } s
+runtime-minutes = { $minutes } min { $seconds } s
+runtime-hours = { $hours } h { $minutes } min
+
 # dates
 date-just-now = Przed chwilą
 date-minute-ago = Minutę temu
@@ -482,17 +546,73 @@ month-12 = gru
 
 # settings
 settings-search = Szukaj w ustawieniach
-settings-tab-general = Ogólne
-settings-tab-appearance = Wygląd
-settings-tab-playback = Odtwarzanie
-settings-tab-privacy = Prywatność
+settings-search-results = Wyniki wyszukiwania
+# where a search result lives: a drill-in page under the page it opens from
+settings-result-place = { $parent } › { $page }
+settings-page-providers = Serwisy
+settings-page-appearance = Wygląd
+settings-page-player-bar = Pasek odtwarzacza
+settings-player-bar-layout = Układ
+settings-player-bar-layout-detail = Rozmieść informacje o utworze, sterowanie odtwarzaniem i pasek postępu
+settings-player-bar-classic = Klasyczny
+settings-player-bar-compact = Kompaktowy
+settings-player-bar-centered = Wyśrodkowany
+settings-player-bar-surface = Powierzchnia
+settings-player-bar-transparent = Przezroczysty pasek odtwarzacza
+settings-player-bar-transparent-detail = Pozwól stronom i panelom bocznym przewijać się pod matowym paskiem odtwarzacza
+settings-player-bar-transparent-needs-blur = Włącz Rozmycie interfejsu, aby strony przewijały się pod matowym paskiem odtwarzacza
+settings-page-now-playing = Teraz odtwarzane
+settings-page-lyrics = Teksty utworów
+settings-page-playback = Odtwarzanie
+settings-page-sound = Dźwięk
+settings-page-storage = Pamięć
+settings-page-scrobbling = Scrobblowanie
+settings-page-general = Ogólne
+settings-page-about = O aplikacji
 settings-tab-integrations = Integracje
+settings-about-name = Sonora
+settings-page-lyrics-sources = Źródła tekstów
+settings-page-music-folders = Foldery z muzyką
+settings-group-services = Serwisy streamingowe
+settings-group-local-files = Pliki lokalne
+settings-group-background = Tło
+settings-group-controls = Sterowanie
+settings-group-display = Wyświetlanie
+settings-group-sources = Źródła
+settings-group-lyrics-order = Priorytet
+settings-group-playing = Odtwarzanie
+settings-group-cache = Odtworzone utwory
+settings-group-downloads = Pobrane
+settings-group-protected = Odtwarzanie chronione
+settings-group-output = Wyjście
+settings-group-status = Status
+settings-group-startup = Uruchamianie
+settings-group-context-menus = Menu kontekstowe
+key-ctrl = Ctrl
+key-super = Super
+key-alt = Alt
+key-shift = Shift
+key-escape = Esc
+key-enter = Enter
+key-space = Spacja
+key-tab = Tab
+key-backspace = Backspace
+key-delete = Delete
+settings-lyrics-sources = Źródła tekstów
+settings-local-folder-count = { $count ->
+    [one] { $count } folder
+    [few] { $count } foldery
+   *[other] { $count } folderów
+    }
+settings-local-folder-none = Brak folderów
+settings-license-short = GPL-3.0 lub nowsza
 settings-theme = Motyw
 settings-theme-detail = Paleta kolorów aplikacji
 settings-opacity = Krycie
 settings-opacity-detail = Dostosuj krycie tła aplikacji
 settings-opacity-value = { $percent }%
 settings-theme-folder = Otwórz konfigurację
+settings-theme-unavailable = Ten motyw można zastosować tylko przy wyłączonym motywie adaptacyjnym
 settings-adaptive = Motyw adaptacyjny
 settings-adaptive-detail = Zabarw paletę okładką odtwarzanego albumu
 settings-ambient = Tło nastrojowe
@@ -505,16 +625,23 @@ settings-visualizer-style-none = Wyłączony
 settings-visualizer-style-bars = Słupki
 settings-visualizer-style-wave = Fala
 settings-visualizer-style-both = Słupki i fala
+settings-visualizer-absolute = Ignoruj głośność
+settings-visualizer-absolute-detail = Rysuj widmo według poziomu samego utworu, niezależnie od głośności w Sonorze
+settings-preview-title = Tytuł utworu
+settings-preview-artist = Wykonawca
+settings-preview-album = Album
 settings-fullscreen-controls-autohide = Ukryj sterowanie na pełnym ekranie
 settings-fullscreen-controls-autohide-detail = Wygaszaj elementy sterowania, gdy na pełnym ekranie nic się nie dzieje
+settings-os-fullscreen = Systemowy pełny ekran
+settings-os-fullscreen-detail = Rozciągnij Teraz odtwarzane na cały ekran, tak jak klawisz F11
 settings-icons = Zestaw ikon
 settings-icons-detail = Wybierz zestaw ikon używany w interfejsie
 settings-motion = Ogranicz animacje
 settings-motion-detail = Pomijaj animacje i przejścia w interfejsie
 settings-pace = Szybkość animacji
 settings-pace-detail = Jak szybko odtwarzane są animacje interfejsu
-settings-saver = Oszczędzanie energii
-settings-saver-detail = Ogranicz liczbę klatek animacji, gdy Sonora nie jest aktywna, od następnego uruchomienia
+settings-saver = Ogranicz FPS nieaktywnego okna
+settings-saver-detail = Zmiany zostaną zastosowane po ponownym uruchomieniu Sonory.
 settings-corners = Narożniki
 settings-corners-detail = Jak bardzo zaokrąglone są powierzchnie i kontrolki
 settings-blur = Rozmycie interfejsu
@@ -526,6 +653,7 @@ settings-font-detail = Bazowy rozmiar tekstu, reszta skaluje się razem z nim
 settings-font-value = { $size } px
 settings-startup = Pokaż przy uruchomieniu
 settings-startup-detail = Ekran otwierany przez Sonorę po uruchomieniu
+settings-startup-no-guest = Niedostępne w trybie gościa
 settings-entries = Sekcje paska bocznego
 settings-entries-detail = Sekcje widoczne na pasku bocznym
 settings-entries-pick = Wybierz sekcje
@@ -552,6 +680,8 @@ settings-controls-side = Strona przycisków
 settings-controls-side-detail = Po której stronie paska tytułu znajdują się przyciski
 settings-close-to-tray = Kontynuuj odtwarzanie po zamknięciu
 settings-close-to-tray-detail = Pozostaw Sonorę w zasobniku systemowym i kontynuuj odtwarzanie po zamknięciu okna
+settings-tray-icon = Pokazuj w zasobniku systemowym
+settings-tray-icon-detail = Umieść w zasobniku systemowym ikonę ze sterowaniem odtwarzaniem
 get-sonora = Pobierz Sonorę
 settings-fullscreen-controls-autohide-automatic = Automatycznie
 settings-fullscreen-controls-autohide-always-hidden = Zawsze ukryte
@@ -560,57 +690,80 @@ settings-normalisation = Normalizacja głośności
 settings-normalisation-detail = Utrzymuje stałą głośność utworów
 settings-gapless = Odtwarzanie bez przerw
 settings-gapless-detail = Przechodzi z utworu do następnego bez pauzy, zgodnie z układem albumu
+settings-keep-tracks = Zachowuj odtworzone utwory
+settings-cache-size = Rozmiar pamięci podręcznej
+settings-cache-size-detail = Ile miejsca mogą zająć odtworzone utwory. Najdawniej odtwarzane jako pierwsze robią miejsce, a pobrane się nie liczą
+settings-cache-size-value = { $count } GB
+settings-cache-used = Zajęte miejsce
+settings-cache-used-detail = Ile zajmują na tym komputerze utwory zachowane po odtworzeniu. Wyczyszczenie ich nie rusza pobranych
+settings-cache-clear = Wyczyść
+settings-downloads-used = Zajęte miejsce
+settings-downloads-used-detail = Ile zajmują na tym komputerze pobrane utwory
+settings-offline-mode = Tryb offline
+settings-offline-mode-detail = Pokazuj i odtwarzaj tylko pobrane utwory
+settings-downloads-remove = Usuń wszystkie
+settings-size-gb = { $size } GB
+settings-size-mb = { $size } MB
+settings-size-measuring = Obliczanie…
+settings-stream-quality = Jakość streamingu
+settings-stream-quality-detail = Wyższe poziomy brzmią lepiej i zużywają więcej danych. Gdy plan lub utwór nie oferuje danego poziomu, gra następny niższy
+settings-stream-quality-hi-res = Hi-res
+settings-stream-quality-lossless = Bezstratna
+settings-stream-quality-high = Wysoka
+settings-stream-quality-normal = Normalna
+settings-stream-quality-low = Niska
+settings-stream-quality-flac = FLAC, { $depth } bit, { $rate } kHz
+settings-stream-quality-flac-up-to = FLAC, do { $depth } bit, { $rate } kHz
+settings-stream-quality-lossy = { $codec }, { $kbps } kb/s
+settings-stream-quality-lossy-up-to = { $codec }, do { $kbps } kb/s
+settings-stream-format = Format strumienia
+settings-stream-format-detail = Na jaki format serwer konwertuje każdy utwór przed wysłaniem
+settings-stream-format-original = Oryginalny
+settings-stream-format-mp3 = MP3
+settings-stream-format-opus = Opus
+settings-stream-format-aac = AAC
+settings-stream-bitrate = Maksymalna przepływność
+settings-stream-bitrate-detail = Serwer obniża wszystko powyżej do tej wartości
+settings-stream-bitrate-unlimited = Bez limitu
+settings-stream-bitrate-value = { $kbps } kb/s
+settings-stream-bitrate-hourly = Około { $megabytes } MB na godzinę
+settings-stream-bitrate-unlimited-detail = Każdy plik z własną przepływnością
+settings-output-device = Urządzenie wyjściowe
+settings-output-device-detail = Urządzenie audio, na którym gra Sonora
+settings-output-device-system = Domyślne systemowe
+settings-output-device-missing = Zapisane urządzenie (niepodłączone)
+settings-output-device-direct = Bezpośrednio do sprzętu
+settings-sample-rate = Częstotliwość próbkowania
+settings-sample-rate-detail = Częstotliwość pracy urządzenia. Sonora konwertuje do niej każdy utwór
+settings-sample-rate-value = { $khz } kHz
+settings-sample-rate-change = Zmień
+settings-buffer = Rozmiar bufora
+settings-buffer-detail = Ile dźwięku Sonora przekazuje urządzeniu naraz
+settings-output-idle = Nic nie gra
+settings-output-device-loading = Wczytywanie urządzeń…
+settings-output-failed = Nieobsługiwane urządzenie
+settings-output-failed-detail = Błąd: { $error }
+settings-signal-source = Źródło
+settings-signal-normalized = Głośność
+settings-signal-gain = { $db } dB
+settings-signal-resampled = Przepróbkowanie
+settings-signal-khz = { $khz } kHz
+settings-signal-kbps = { $kbps } kb/s
+settings-signal-bits = { $depth } bit
+settings-signal-source-detail = { $rate } · { $quality }
 settings-sleep = Wyłącznik czasowy
 settings-sleep-detail = Muzyka zatrzyma się sama po ustalonym czasie, żeby mogła ukołysać do snu
+settings-stay-awake = Nie usypiaj podczas odtwarzania
+settings-stay-awake-detail = Blokuj uśpienie podczas odtwarzania i nie wygaszaj ekranu, gdy otwarte jest Teraz odtwarzane
 settings-sleep-configure = Skonfiguruj…
 settings-sleep-off = Wył
 settings-sleep-end-of-track = Na końcu utworu
 settings-sleep-minutes = { $count } min
-settings-panel-lyrics-size = Rozmiar tekstu utworu (panel)
-settings-panel-lyrics-size-detail = Rozmiar wierszy tekstu utworu w panelu bocznym ponad bazowy rozmiar czcionki
-settings-fullscreen-lyrics-size = Rozmiar tekstu utworu (pełny ekran)
-settings-fullscreen-lyrics-size-detail = Rozmiar wierszy tekstu utworu w odtwarzaczu pełnoekranowym ponad bazowy rozmiar czcionki
-settings-lyrics-size-value = { $size }%
-settings-lyrics-for-local-files = Tekst dla lokalnych plików
-settings-lyrics-for-local-files-detail = Użyj metadanych lokalnych plików do pobierania tekstu z internetu
-settings-karaoke-lyrics = Tekst karaoke
-settings-karaoke-lyrics-detail = Podświetlaj tekst słowo po słowie, gdy dostępne jest dopasowanie w czasie
-settings-blur-lyrics = Rozmyj nieaktywny tekst
-settings-blur-lyrics-detail = Rozmywa poprzednie i następne wersy w panelu tekstu
-settings-romanized-lyrics = Latynizacja tekstu
-settings-romanized-lyrics-detail = Pokazuj wymowę generowaną lokalnie dla wybranych systemów pisma
-settings-romanization-writing-systems = Systemy pisma
-settings-lyrics-providers = Źródła tekstów piosenek
-settings-lyrics-providers-detail = Wybierz serwisy do wyszukiwania tekstów piosenek
-settings-lyrics-providers-selected = { $count ->
-    [one] Wybrano { $count } źródło
-    [few] Wybrano { $count } źródła
-   *[other] Wybrano { $count } źródeł
-    }
-settings-lyrics-provider-musixmatch = Musixmatch
-settings-lyrics-provider-lrclib = LRCLIB
-settings-lyrics-provider-kugou = Kugou
-settings-lyrics-provider-netease = NetEase
-settings-romanization-japanese = Pismo japońskie
-settings-romanization-chinese = Pismo chińskie
-settings-romanization-korean = Pismo koreańskie
-settings-romanization-cyrillic = Cyrylica
-settings-romanization-greek = Pismo greckie
-settings-romanization-arabic = Pismo arabskie
-settings-romanization-other = Inne systemy pisma
-settings-advanced = Zaawansowane
-settings-group-window = Okno
-settings-group-accounts = Konta
-settings-group-library = Biblioteka
-settings-group-text = Tekst
-settings-group-motion = Animacje
-settings-group-fullscreen = Pełny ekran
-settings-group-title-bar = Pasek tytułu
-settings-group-window-style = Styl okna
+confirm-remove-downloads-title = Usunąć wszystkie pobrane?
+confirm-remove-downloads = Wszystkie pobrane utwory ze wszystkich serwisów zostaną usunięte z tego komputera. Będą znów streamowane, dopóki ich ponownie nie pobierzesz.
 settings-equalizer = Korektor
-settings-equalizer-detail = Kształtuje brzmienie w dziesięciu pasmach, po jednym na oktawę
-settings-equalizer-preset = Ustawienie
-settings-equalizer-preset-detail = Gotowa krzywa dla pasm poniżej
+settings-equalizer-detail = Kształtuje dźwięk presetem lub własną krzywą
+settings-equalizer-preset-detail = Gotowe brzmienie lub jeden z Twoich profili
 settings-equalizer-custom = Własne
 settings-equalizer-flat = Płaskie
 settings-equalizer-bass-boost = Więcej basu
@@ -624,22 +777,183 @@ settings-equalizer-classical = Klasyka
 settings-equalizer-electronic = Elektronika
 settings-equalizer-acoustic = Akustyka
 settings-equalizer-loudness = Głośność
-settings-equalizer-decibels = { $db } dB
-settings-equalizer-hertz = { $hz } Hz
-settings-equalizer-kilohertz = { $khz } kHz
-settings-group-equalizer = Korektor
-settings-group-lyrics = Tekst utworu
-settings-group-project = Projekt
+equalizer-advanced = Zaawansowany
+equalizer-simple = Prosty
+equalizer-sound = Brzmienie
+equalizer-profile-default = Domyślny
+equalizer-profile-new = Profil { $number }
+equalizer-profile-pasted = Wklejony profil
+equalizer-profile-name-hint = Nazwa profilu
+equalizer-save-as = Zapisz jako profil
+equalizer-rename = Zmień nazwę profilu
+equalizer-delete = Usuń profil
+equalizer-delete-confirm = Usunąć „{ $name }”? Tej operacji nie można cofnąć.
+equalizer-undo = Cofnij
+equalizer-redo = Ponów
+equalizer-bass = Bas
+equalizer-treble = Soprany
+equalizer-tone-reset = Przywróć 0 dB
+equalizer-preamp = Przedwzmacniacz
+equalizer-preamp-auto = Automatyczny
+equalizer-preamp-manual = Ręczny
+equalizer-decibels = dB
+equalizer-decibels-value = { $db } dB
+equalizer-hertz = Hz
+equalizer-q = Q
+equalizer-octaves = okt.
+equalizer-no-gain = —
+equalizer-filters = Filtry
+equalizer-no-filters = Brak filtrów. Dodaj filtr, wybierz preset powyżej lub zaimportuj profil.
+equalizer-add-filter = Dodaj filtr
+equalizer-remove-filter = Usuń filtr
+equalizer-kind-peak = Szczytowy
+equalizer-kind-low-shelf = Półkowy niski
+equalizer-kind-high-shelf = Półkowy wysoki
+equalizer-kind-low-pass = Dolnoprzepustowy
+equalizer-kind-high-pass = Górnoprzepustowy
+equalizer-kind-notch = Wycinający
+equalizer-kind-band-pass = Pasmowoprzepustowy
+equalizer-kind-all-pass = Wszechprzepustowy
+equalizer-transfer = Import i eksport
+equalizer-import = Importuj
+equalizer-export = Eksportuj
+equalizer-import-file = Importuj plik…
+equalizer-paste = Wklej
+equalizer-copy = Kopiuj
+equalizer-export-file = Eksportuj plik…
+equalizer-imported = Zaimportowano { $name }
+equalizer-imported-skipped = Zaimportowano { $name } bez { $count ->
+        [one] jednego wiersza
+        [few] { $count } wierszy
+       *[other] { $count } wierszy
+    }
+equalizer-import-nothing = Nie znaleziono ustawień korektora do zaimportowania
+equalizer-import-too-many = Nie zaimportowano: { $count ->
+        [one] włączony jest jeden filtr
+        [few] włączone są { $count } filtry
+       *[other] włączonych jest { $count } filtrów
+    }, więcej niż mieści profil
+equalizer-import-too-large = Nie zaimportowano: tekst ma ponad 1 MB, za dużo jak na profil korektora
+equalizer-filter-limit =Profil mieści do { $max } filtrów.
+equalizer-paste-empty = Schowek nie zawiera tekstu
+equalizer-copied = Skopiowano profil jako tekst Equalizer APO
+equalizer-exported = Wyeksportowano profil
+equalizer-dialog-failed = Nie udało się otworzyć okna wyboru pliku
+equalizer-file-unreadable = Nie udało się odczytać pliku
+equalizer-file-unwritable = Nie udało się zapisać pliku
+equalizer-value-refused = Zachowano poprzednią wartość
+equalizer-skipped-line = Wiersz { $line }: { $reason }
+equalizer-skipped-more = i { $count ->
+        [one] jeszcze jeden
+        [few] jeszcze { $count }
+       *[other] jeszcze { $count }
+    }
+equalizer-skip-unknown-type = nieznany typ filtra { $name }
+equalizer-skip-unreadable = to nie jest filtr, który Sonora potrafi odczytać
+equalizer-skip-no-frequency = brak częstotliwości
+equalizer-skip-no-gain = brak wzmocnienia
+equalizer-skip-no-width = brak Q ani szerokości pasma
+equalizer-skip-expression = wartość zapisana jako wyrażenie
+equalizer-skip-no-preamp = przedwzmacniacz nie jest liczbą
+equalizer-skip-unsupported = { $name } nie jest obsługiwany
+equalizer-rules = Reguły urządzeń
+equalizer-rule-other = Każde inne urządzenie
+equalizer-rule-playing = Teraz gra
+equalizer-rule-disconnected = Niepodłączone
+equalizer-rule-replaces = Zastępuje jego regułę
+equalizer-rule-choose-device = Wybierz urządzenie
+equalizer-rule-choose-sound = Wybierz brzmienie
+equalizer-rule-add = Dodaj regułę
+equalizer-rule-remove = Usuń regułę
+equalizer-output-port = { $device } · { $port }
+signal-path-codec-alac = ALAC
+signal-path-codec-pcm = PCM
+signal-path-codec-other = Inny kodek
+equalizer-invalid-frequency = Częstotliwość musi wynosić od { $low } do { $high } Hz
+equalizer-invalid-gain = Wzmocnienie musi wynosić od { $low } do { $high } dB
+equalizer-invalid-q = Q musi wynosić od { $low } do { $high }
+equalizer-invalid-octaves = Szerokość pasma musi wynosić od { $low } do { $high } oktaw
+equalizer-invalid-shelf-octaves = Filtr półkowy przyjmuje Q, a nie szerokość pasma
+equalizer-invalid-preamp = Przedwzmacniacz musi wynosić od { $low } do { $high } dB
+equalizer-overload = Przesterowanie o { $db } dB
+equalizer-overload-slight = Przesterowanie poniżej 0,1 dB
+equalizer-graph-preamp = { $db } dB
+equalizer-lower-preamp = Obniż przedwzmacniacz
+equalizer-level = Poziom
+equalizer-status-bit-perfect = Bit-perfect
+equalizer-status-bit-perfect-detail = Bit-perfect z Sonory
+equalizer-status-server = Serwer dźwięku konwertuje go potem do { $khz } kHz
+equalizer-status-altered = Brak bit-perfect z powodu:
+equalizer-status-separator = {", "}
+equalizer-status-more = +{ $count }
+equalizer-status-equalized = EQ
+equalizer-status-volume = Głośność
+equalizer-status-normalized = Normalizacja
+equalizer-status-rate = { $from } → { $to } kHz
+equalizer-status-bits = { $from } → { $to } bit
+equalizer-status-float = Float → { $to } bit
+equalizer-status-channels = { $from ->
+    [1] Mono
+    [2] Stereo
+   *[other] { $from } kan.
+} → { $to ->
+    [1] mono
+    [2] stereo
+   *[other] { $to } kan.
+}
+settings-panel-lyrics-size = Rozmiar tekstu utworu (panel)
+settings-panel-lyrics-size-detail = Rozmiar wierszy tekstu utworu w panelu bocznym ponad bazowy rozmiar czcionki
+settings-fullscreen-lyrics-size = Rozmiar tekstu utworu (pełny ekran)
+settings-fullscreen-lyrics-size-detail = Rozmiar wierszy tekstu utworu w odtwarzaczu pełnoekranowym ponad bazowy rozmiar czcionki
+settings-lyrics-size-value = { $size }%
+settings-lyrics-for-local-files = Tekst dla lokalnych plików
+settings-lyrics-for-local-files-detail = Użyj metadanych lokalnych plików do pobierania tekstu z internetu
+settings-karaoke-lyrics = Tekst karaoke
+settings-karaoke-lyrics-detail = Podświetlaj tekst słowo po słowie, gdy dostępne jest dopasowanie w czasie
+settings-blur-lyrics = Rozmyj nieaktywny tekst
+settings-blur-lyrics-detail = Rozmywa poprzednie i następne wersy w panelu tekstu
+settings-lyrics-sample-first = Dowolne dane
+settings-lyrics-sample-second = Tu wstaw zabawny tekst
+settings-lyrics-sample-japanese = ここに面白い文章を入れてください
+settings-lyrics-sample-romanized = koko ni omoshiroi bunshou o irete kudasai
+settings-lyrics-sample-fourth = Mam nadzieję, że ten japoński się zgadza
+settings-lyrics-sample-fifth = Piąty wers
+settings-romanized-lyrics = Latynizacja tekstu
+settings-romanized-lyrics-detail = Pokazuj wymowę generowaną lokalnie dla wybranych systemów pisma
+settings-romanization-writing-systems = Systemy pisma
+settings-lyrics-priority = Priorytet serwisów
+settings-lyrics-priority-detail = Spośród tekstów tego samego rodzaju Sonora pokazuje ten ze źródła wyżej na liście
+settings-lyrics-providers-detail = Wybierz serwisy do wyszukiwania tekstów piosenek
+settings-lyrics-providers-selected = { $count ->
+    [one] Wybrano { $count } źródło
+    [few] Wybrano { $count } źródła
+   *[other] Wybrano { $count } źródeł
+    }
+settings-lyrics-provider-local = Pliki lokalne
+settings-lyrics-provider-subsonic = Subsonic
+settings-lyrics-provider-musixmatch = Musixmatch
+settings-lyrics-provider-lrclib = LRCLIB
+settings-lyrics-provider-kugou = Kugou
+settings-lyrics-provider-netease = NetEase
+settings-romanization-japanese = Pismo japońskie
+settings-romanization-chinese = Pismo chińskie
+settings-romanization-korean = Pismo koreańskie
+settings-romanization-cyrillic = Cyrylica
+settings-romanization-greek = Pismo greckie
+settings-romanization-arabic = Pismo arabskie
+settings-romanization-other = Inne systemy pisma
+settings-group-window = Okno
+settings-group-text = Tekst
+settings-group-motion = Animacje
+settings-group-streaming = Streaming
 settings-adaptive-menu = Adaptacyjne menu kontekstowe
 settings-adaptive-menu-detail = Pomija pozycje, które wiersz już pokazuje, na przykład album lub wykonawcę
 settings-accounts = Zarządzaj kontami
 settings-accounts-detail = Serwisy, z których to urządzenie może odtwarzać muzykę
-settings-provider-none = Nie połączono
-settings-provider-connected = Połączono
 settings-provider-current = Odtwarzanie z tego serwisu
-settings-provider-switch = Przełącz
+settings-provider-sign-in = Zaloguj się
+settings-profile-account = { $provider } · { $account }
 settings-sign-out = Wyloguj się
-settings-group-scrobbling = Scrobblowanie
 settings-lastfm = Last.fm
 settings-lastfm-detail = Sonora scrobbluje przez twoje własne konto API Last.fm. Załóż je, a potem wklej tutaj klucz i sekret.
 settings-librefm = Libre.fm
@@ -670,28 +984,18 @@ settings-rescan = Skanuj ponownie
 settings-scan-walking = Skanuję…
 settings-scan-progress = { $percent }%
 settings-scan-done = Gotowe w { $seconds } s
-settings-tab-about = O programie
 settings-version = Wersja
 settings-version-detail = Wydanie sonory, które jest teraz uruchomione
 settings-license = Licencja
 settings-license-detail = GNU General Public License w wersji 3 lub nowszej
-settings-license-view = Przeczytaj licencję
 settings-source = Kod źródłowy
 settings-source-detail = Kod źródłowy odpowiadający temu wydaniu
-settings-source-view = Otwórz repozytorium
 settings-team = Zespół
-settings-team-github = GitHub
-
 # themes
 theme-system = Systemowy
 theme-dark = Ciemny
 theme-light = Jasny
-theme-midnight = Północ
-theme-forest = Las
-theme-ocean = Ocean
-theme-rose = Róża
-theme-lavender = Lawenda
-theme-amber = Bursztyn
+theme-unavailable = { $name } (niedostępny)
 
 # corners
 corners-square = Proste
@@ -707,18 +1011,18 @@ pace-slow = Wolno
 pace-base = Standardowo
 pace-quick = Szybko
 saver-off = Wył.
-saver-light = Słabe ({ $fps } FPS)
-saver-medium = Średnie ({ $fps } FPS)
-saver-strong = Silne ({ $fps } FPS)
+saver-fps = { $fps } FPS
 
 toast-playlist-created = Utworzono playlistę
 toast-playlist-renamed = Zmieniono nazwę playlisty
 toast-playlist-deleted = Usunięto playlistę
+toast-local-delete-failed = Nie udało się usunąć części plików utworów
 toast-playlist-added = Dodano playlistę do biblioteki
 toast-playlist-removed = Usunięto playlistę z biblioteki
 toast-playlist-visibility = Zmieniono widoczność playlisty
 toast-track-added = Dodano do { $name }
 toast-track-removed = Usunięto z { $name }
+toast-track-removed-unnamed = Usunięto z playlisty
 toast-playlist-failed = Nie udało się zapisać zmiany
 toast-playlist-busy = Inna zmiana wciąż trwa
 toast-playlist-signed-out = Zaloguj się, aby zmieniać playlisty
@@ -735,12 +1039,74 @@ toast-queued-artist = Wykonawcę dodano do kolejki
 toast-next-artist = Wykonawca zabrzmi następny
 toast-last-artist = Wykonawca zabrzmi na końcu
 toast-queue-failed = Nie udało się dodać do kolejki
+toast-queue-local-elsewhere = Lokalnych plików nie można dodać do kolejki na innym urządzeniu
+toast-queued-tracks = Dodano do kolejki utwory: { $count }
+toast-next-tracks = Utwory zabrzmią jako następne: { $count }
+toast-last-tracks = Utwory zabrzmią na końcu: { $count }
+toast-queue-cleared = Wyczyszczono kolejkę
+toast-queue-removed-track = Usunięto { $name } z kolejki
+toast-queue-removed-tracks = Usunięto z kolejki utwory: { $count }
+toast-sleep-ended = Wyłącznik czasowy zadziałał
+toast-radio-failed = Nie udało się uruchomić radia dla { $name }
+toast-similar-failed = Nie znaleziono utworów podobnych do { $name }
+toast-open-failed = Nie udało się otworzyć { $name }
+toast-open-unsupported = { $name } to nie plik audio, który Sonora potrafi odtworzyć
+toast-open-all-failed = Nie udało się otworzyć plików: { $count }
+toast-open-some-failed = Nie udało się otworzyć części plików
 toast-sign-in-to-play = { $name } udostępnia muzykę tylko po zalogowaniu
+toast-restore-failed = Nie udało się ponownie zalogować do { $name }, więc Sonora działa dalej bez tego serwisu
 toast-track-unplayable = Nie udało się odtworzyć { $name }
+toast-playback-stopped = Odtwarzanie zatrzymane, bo kilku kolejnych utworów nie udało się odtworzyć
+toast-open-settings = Ustawienia
+toast-throttled = { $name } chwilowo ogranicza odtwarzanie. Ponowna próba za moment
+toast-still-throttled = { $name } nadal ogranicza odtwarzanie. Naciśnij Odtwórz, aby spróbować ponownie
 toast-library-add-failed = Nie udało się dodać { $name } do biblioteki
 toast-library-remove-failed = Nie udało się usunąć { $name } z biblioteki
 toast-library-added = Dodano do biblioteki
 toast-library-removed = Usunięto z biblioteki
+toast-library-removed-one = Usunięto { $name } z biblioteki
+toast-library-songs-removed = Usunięto { $count ->
+        [one] jeden utwór
+        [few] { $count } utwory
+       *[other] { $count } utworów
+    } z biblioteki
+toast-library-albums-removed = Usunięto { $count ->
+        [one] jeden album
+        [few] { $count } albumy
+       *[other] { $count } albumów
+    } z biblioteki
+toast-playlists-removed = Usunięto { $count ->
+        [one] jedną playlistę
+        [few] { $count } playlisty
+       *[other] { $count } playlist
+    } z biblioteki
+toast-favorite-removed = Usunięto { $name } z ulubionych
+toast-favorite-songs-removed = Usunięto { $count ->
+        [one] jeden utwór
+        [few] { $count } utwory
+       *[other] { $count } utworów
+    } z ulubionych
+toast-favorite-albums-removed = Usunięto { $count ->
+        [one] jeden album
+        [few] { $count } albumy
+       *[other] { $count } albumów
+    } z ulubionych
+toast-favorite-artists-removed = Usunięto { $count ->
+        [one] jednego wykonawcę
+        [few] { $count } wykonawców
+       *[other] { $count } wykonawców
+    } z ulubionych
+toast-tracks-removed = Usunięto { $count ->
+        [one] jeden utwór
+        [few] { $count } utwory
+       *[other] { $count } utworów
+    } z { $name }
+toast-tracks-removed-unnamed = Usunięto { $count ->
+        [one] jeden utwór
+        [few] { $count } utwory
+       *[other] { $count } utworów
+    } z playlisty
+toast-unpinned = Odpięto { $name }
 
 # lyrics
 lyrics-title = Tekst
@@ -751,6 +1117,7 @@ lyrics-instrumental = Ten utwór jest instrumentalny
 lyrics-failed = Nie udało się połączyć z serwisem tekstów
 lyrics-follow = Znów podążaj za utworem
 lyrics-source = Tekst z { $source }
+lyrics-source-local = Tekst z lokalnego pliku
 lyrics-writers = Autorzy: { $writers }
 
 update-available = Sonora { $version } jest dostępna
@@ -758,20 +1125,35 @@ update-detail = Masz wersję { $running }. Zobacz, co się zmieniło, albo zaktu
 update-detail-notes = Masz { $running }. Zobacz, co się zmieniło, a potem zaktualizuj Sonorę tak, jak ją zainstalowano.
 update-notes = Co nowego
 update-now = Aktualizuj
-update-later = Później
 update-working = Pobieranie aktualizacji…
 update-failed = Nie udało się zainstalować aktualizacji. Spróbuj ze strony wydań.
+update-never = Nie sprawdzaj aktualizacji
+notice-never = Nie pokazuj ponownie
+requirement-audio-bridge-title = Sonora nie może połączyć się z serwerem dźwięku
+requirement-audio-bridge = { $server ->
+    [pulseaudio] PulseAudio działa, ale ALSA nie ma do niego dostępu, więc nic nie słychać. Zainstaluj pulseaudio-alsa i uruchom Sonorę ponownie.
+   *[pipewire] PipeWire działa, ale ALSA nie ma do niego dostępu, więc nic nie słychać. Zainstaluj pipewire-alsa i uruchom Sonorę ponownie.
+}
+requirement-audio-output-title = Brak wyjścia dźwięku
+requirement-audio-output = Sonora nie mogła otworzyć urządzenia audio, więc nic nie słychać. Sprawdź, czy urządzenie jest podłączone i nie zajmuje go inna aplikacja.
+requirement-web-engine-title = Logowanie w przeglądarce jest niedostępne
+requirement-help = Co zainstalować
 settings-check-updates = Sprawdzaj aktualizacje
 settings-check-updates-detail = Zapytaj GitHuba przy starcie, czy jest nowsza wersja. Sonora instaluje aktualizację sama tylko w systemie Windows, w pozostałych pokazuje, co się zmieniło
 settings-log = Plik dziennika
 settings-log-detail = Co Sonora zapisała podczas działania. Dołącz go do zgłoszenia błędu
 settings-log-open = Otwórz dziennik
+
+# tags
 tags-edit-title = Edycja tagów
 tags-sheet-song = Utwór
 tags-sheet-album = Album
 tags-sheet-details = Szczegóły
 tags-title = Tytuł
 tags-artist = Wykonawca
+tags-artists = Wykonawcy
+tags-add-artist = Dodaj wykonawcę
+tags-remove-artist = Usuń tego wykonawcę
 tags-track = Numer utworu
 tags-track-total = Utworów w wydaniu
 tags-disc = Numer płyty
@@ -786,8 +1168,15 @@ tags-isrc = ISRC
 tags-comment = Komentarz
 toast-tags-saved = Zapisano tagi „{ $name }”
 toast-tags-failed = Nie udało się zapisać tagów
+toast-output-select-failed = Nie udało się wybrać { $name }
+toast-output-default-failed = Nie udało się wybrać domyślnego urządzenia systemowego
 
 nav-pin = Przypnij
+toast-jam-unreadable = Ten link nie prowadzi do Jamu, do którego można dołączyć.
+toast-jam-failed = Nie udało się rozpocząć Jamu ani do niego dołączyć.
+toast-jam-ended = Jam zakończony
+toast-jam-left = Opuszczono Jam
+toast-jam-leave-failed = Nie udało się zakończyć ani opuścić Jamu.
 nav-nothing-pinned = Tu jest pusto
 nav-pins-alphabetical = Alfabetycznie
 nav-pins-kind = Według typu
@@ -800,3 +1189,91 @@ trouble-offline-detail = Sprawdź połączenie z internetem i spróbuj ponownie.
 trouble-not-loaded = Nie udało się wczytać
 trouble-retry = Spróbuj ponownie
 toast-offline = Brak połączenia. Nic nie zostanie odtworzone, dopóki nie wróci.
+toast-offline-unsupported = { $name } odtwarza pobrane utwory tylko w trybie online.
+toast-offline-mode = Jesteś offline. Przejdź do trybu online, aby streamować ten utwór.
+offline-title = Jesteś offline.
+offline-go-online = Przejdź do trybu online
+toast-download-failed = Nie udało się ustalić listy utworów do pobrania.
+toast-downloading = Pobieranie { $name }
+toast-downloading-songs = { $count ->
+    [one] Pobieranie { $count } utworu
+    [few] Pobieranie { $count } utworów
+   *[other] Pobieranie { $count } utworów
+}
+toast-downloaded = Pobrano { $name }
+toast-downloaded-songs = { $count ->
+    [one] Pobrano { $count } utwór
+    [few] Pobrano { $count } utwory
+   *[other] Pobrano { $count } utworów
+}
+toast-download-set-failed = Nie udało się pobrać części utworów z { $name }
+toast-download-song-failed = Nie udało się pobrać { $name }
+toast-download-songs-failed = Nie udało się pobrać części utworów
+toast-percent = { $percent }%
+toast-download-cancelled = Anulowano pobieranie { $name }
+toast-downloads-cancelled = { $count ->
+    [one] Anulowano pobieranie { $count } utworu
+    [few] Anulowano pobieranie { $count } utworów
+   *[other] Anulowano pobieranie { $count } utworów
+}
+toast-settings-broken = Popraw wiersz { $name } w settings.json, aby zapisać zmiany
+toast-tray-unavailable = Brak zasobnika systemowego, w którym można umieścić ikonę
+toast-undo = Cofnij
+toast-link-copied = Skopiowano link
+toast-link-sign-in = Zaloguj się do { $name }, aby otworzyć ten link
+toast-link-unreadable = Ten link nie prowadzi do niczego, co Sonora potrafi otworzyć
+toast-code-copied = Skopiowano kod
+menu-copy-link-none = Brak linku do udostępnienia
+menu-copy-link-local = Lokalni wykonawcy i playlisty nie mają linków
+toast-settings-save-failed = Nie udało się zapisać ustawień
+toast-settings-overwritten = Plik settings.json zmienił się na dysku, więc ostatnia zmiana nie została zapisana
+toast-library-scanned = { $count ->
+    [one] Przeskanowano bibliotekę, znaleziono jeden utwór
+    [few] Przeskanowano bibliotekę, znaleziono { $count } utwory
+   *[other] Przeskanowano bibliotekę, znaleziono { $count } utworów
+}
+toast-scan-failed = Nie udało się przeskanować folderów z muzyką
+toast-folder-removed = Usunięto { $name }
+toast-folder-missing = Folderu { $name } nie ma już na dysku
+toast-history-removed = { $count ->
+    [one] Usunięto z historii
+    [few] Usunięto { $count } utwory z historii
+   *[other] Usunięto { $count } utworów z historii
+}
+toast-history-remove-failed = Nie udało się usunąć utworu z historii
+toast-history-restore-failed = Nie udało się przywrócić historii
+toast-history-clear-failed = Nie udało się wyczyścić historii
+
+# power
+wake-reason = Odtwarzana jest muzyka
+
+toast-sample-plain = Utworzono wydarzenie
+toast-sample-done = Zapisano w bibliotece
+toast-sample-info = Przyjdź 10 minut przed wydarzeniem.
+toast-sample-warning = Twoja sesja kończy się za pięć minut
+toast-sample-failed = Nie udało się połączyć z serwerem
+toast-sample-loading = Przesyłanie utworów
+toast-sample-event = Utworzono wydarzenie
+toast-sample-event-detail = Niedziela, 3 grudnia, 9:00
+toast-sample-delete = Usunięto { $name }
+toast-sample-undo = Cofnij
+toast-sample-cancel = Anuluj
+toast-sample-undone = Cofnięto
+toast-sample-queued = { $name } dodano do kolejki
+toast-sample-long = To powiadomienie mówi o wiele więcej niż pozostałe, więc tekst musi zawinąć się do drugiego, a może i trzeciego wiersza, nie wypychając przycisku zamknięcia poza kartę
+toast-sample-saving = Zapisywanie { $name }
+toast-sample-saved = Zapisano { $name }
+toast-sample-save-failed = Nie udało się zapisać { $name }
+toast-sample-save-failed-detail = Serwer odpowiedział 503 Service Unavailable
+toast-sample-lasting = To powiadomienie zostaje, dopóki go nie zamkniesz
+toast-sample-burst = Powiadomienie nr { $name }
+
+# Frequency response graph
+response-graph-hz = { $value } Hz
+response-graph-khz = { $value } kHz
+response-graph-db = { $value } dB
+response-graph-readout = { $frequency } · { $direction ->
+        [up] +{ $gain }
+        [down] -{ $gain }
+       *[flat] { $gain }
+    } dB

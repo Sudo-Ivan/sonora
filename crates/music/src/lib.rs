@@ -1,35 +1,46 @@
-mod audio;
-pub mod cache;
+mod aac;
+pub mod audio;
+pub mod binimum;
+mod calendar;
+pub mod connect;
 pub mod credentials;
 pub mod deezer;
 pub mod engine;
 pub mod equalizer;
 pub mod escape;
 pub mod kugou;
+pub mod link;
 pub mod local;
 pub mod lrclib;
 pub mod lyrics;
 mod models;
 pub mod musixmatch;
 pub mod netease;
+pub mod output;
 pub mod progress;
 pub mod scrobble;
 mod sink;
 mod spectrum;
 mod stream;
 pub mod subsonic;
+pub mod tidal;
 pub mod tls;
 pub mod trouble;
+pub mod vault;
 
 use std::collections::HashMap;
+use std::num::NonZero;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 use async_trait::async_trait;
+use time::format_description::well_known::Iso8601;
+use time::parsing::Parsed;
+use time::{Month, OffsetDateTime};
 
-pub use cache::{CachedMeta, StreamCache};
+pub use audio::Meter;
 pub use equalizer::Equalizer;
 pub use models::{
     Album, AlbumCatalogue, AlbumDetail, Artist, ArtistCatalogue, ArtistProfile, ArtistRef,
@@ -38,7 +49,8 @@ pub use models::{
     Playlist, PlaylistDetail, ReleaseType, RomanizedText, SavedArtist, Track, TrackKey, TrackTags,
     UserDetail, UserProfile, Voice, WritingSystem,
 };
-pub use spectrum::Spectrum;
+pub use output::{Server as SoundServer, missing_bridge};
+pub use spectrum::{Analyzer, Level, Spectrum, Watch};
 
 pub const LOCAL_TRACK_PREFIX: &str = "local:";
 pub const LOCAL_ALBUM_PREFIX: &str = "local-album:";
@@ -92,6 +104,12 @@ pub enum Report {
 pub trait MusicApi: Send + Sync {
     fn alive(&self) -> bool {
         true
+    }
+
+    /// The provider's device network, for a provider that has one.
+    /// only one so far.
+    fn connect(&self) -> Option<Arc<dyn connect::Connect>> {
+        None
     }
 
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String>;
@@ -208,13 +226,23 @@ pub trait MusicApi: Send + Sync {
     async fn add_playlist_to_library(&self, playlist_id: &str) -> Result<()>;
 
     /// Puts a track or an album into the listener's library, or takes it out, on a provider
-    /// whose library is apart from its favorites. Only a `Capabilities::library` provider
+    /// whose library is apart from its favorites. Only a `Catalog::Editable` provider
     /// answers. An artist is never added: a library artist is one whose music is there.
     async fn set_in_library(&self, _kind: MediaKind, _id: &str, _present: bool) -> Result<()> {
         anyhow::bail!("this provider has no library apart from its favorites")
     }
     async fn set_playlist_public(&self, playlist_id: &str, public: bool) -> Result<()>;
     async fn add_track_to_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()>;
+
+    /// Adds tracks to the end of a playlist in order, and a track named twice goes in twice. A
+    /// provider that takes many at once does it in one write. The default adds them one by one
+    /// and stops at the first that fails, leaving the ones before it in.
+    async fn add_tracks_to_playlist(&self, playlist_id: &str, track_ids: &[String]) -> Result<()> {
+        for track_id in track_ids {
+            self.add_track_to_playlist(playlist_id, track_id).await?;
+        }
+        Ok(())
+    }
     async fn remove_track_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()>;
     async fn saved_albums(&self) -> Result<Vec<Album>>;
 
@@ -333,9 +361,180 @@ pub struct PlaybackConfig {
     pub position_interval: Duration,
     pub gain: f32,
     pub equalizer: Equalizer,
-    /// Where the engine may keep downloaded tracks for replay, `None` to keep nothing or
-    /// for an engine whose tracks are already files, like the local one.
-    pub stream_cache: Option<StreamCache>,
+    pub transcode: Transcode,
+    pub quality: Quality,
+    /// Shared like `equalizer`: every output the engine opens reports its loudest sample here.
+    pub meter: Meter,
+    /// Shared like `equalizer`: every output the engine opens lets it hear the music ahead of the
+    /// equalizer while it is watched.
+    pub analyzer: Analyzer,
+    /// Where tracks are kept, the downloads and, while caching is on, the ones that played.
+    pub vault: Option<Arc<vault::Vault>>,
+}
+
+/// How good a stream to ask a streaming service for. Each provider lists the levels it serves in
+/// [`Capabilities::qualities`], plays any other level as the nearest of those through
+/// [`Quality::within`], and steps further down by itself when the account or the track has
+/// nothing at that level.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Quality {
+    Low,
+    Normal,
+    High,
+    Lossless,
+    #[default]
+    HiRes,
+}
+
+impl Quality {
+    /// Every level, best first.
+    pub const ALL: [Self; 5] = [
+        Self::HiRes,
+        Self::Lossless,
+        Self::High,
+        Self::Normal,
+        Self::Low,
+    ];
+
+    /// The name settings store the level by.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::HiRes => "hi-res",
+            Self::Lossless => "lossless",
+            Self::High => "high",
+            Self::Normal => "normal",
+            Self::Low => "low",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|quality| quality.id() == id)
+    }
+
+    /// The level out of `offers` that stands in for this one: the best at or below it, or the
+    /// lowest offered when every one is above it. It is this level itself when `offers` is
+    /// empty.
+    pub fn within(self, offers: &[Offer]) -> Self {
+        let levels = || offers.iter().map(|offer| offer.quality);
+        let below = levels().filter(|level| *level <= self).max();
+        below.or_else(|| levels().min()).unwrap_or(self)
+    }
+}
+
+/// One level a service serves and what it streams at that level, so the listener can choose by
+/// what they will hear.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Offer {
+    pub quality: Quality,
+    pub encoding: Encoding,
+    /// The figures are the most a track comes at. Many come lower, such as an album that was
+    /// never mastered in hi-res, or a plan that does not reach that far.
+    pub up_to: bool,
+}
+
+/// What a stream or a file is encoded as: a lossless encoding with its bit depth, a lossy one
+/// with its bit rate in kilobits a second.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Encoding {
+    /// FLAC at this bit depth and sample rate in hertz.
+    Flac {
+        depth: u8,
+        rate: u32,
+    },
+    /// Apple Lossless at this bit depth.
+    Alac {
+        depth: u8,
+    },
+    /// Uncompressed, as in WAV or AIFF, at this bit depth.
+    Pcm {
+        depth: u8,
+    },
+    Aac {
+        kbps: u32,
+    },
+    Vorbis {
+        kbps: u32,
+    },
+    Mp3 {
+        kbps: u32,
+    },
+    Opus {
+        kbps: u32,
+    },
+    /// A codec Sonora has no name for.
+    Other,
+}
+
+/// What an engine knows about one track, reported as `PlaybackEvent::Signal` as it starts
+/// decoding it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrackSignal {
+    /// How the provider encodes it, when it says.
+    pub encoding: Option<Encoding>,
+    /// The rate and channel count it decodes to, before Sonora resamples it to the device's.
+    pub rate: u32,
+    pub channels: u16,
+    pub normalisation: Normalisation,
+}
+
+/// What loudness normalisation does to a track.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Normalisation {
+    Off,
+    /// A fixed gain in decibels, zero when nothing says how loud the track is.
+    Gain(f32),
+    /// A provider that normalises inside its own player with a limiter does not know the gain
+    /// and changes with the music.
+    Limited,
+}
+
+/// What a server that converts audio on request is asked to send. Only Subsonic honours it, and
+/// the default leaves both choices to the server.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Transcode {
+    pub codec: Option<Codec>,
+    /// The highest bitrate to send, in kilobits per second.
+    pub bitrate: Option<u32>,
+}
+
+impl Encoding {
+    /// The bits per sample of a lossless encoding, which a lossy one has none of.
+    pub fn depth(self) -> Option<u8> {
+        match self {
+            Self::Flac { depth, .. } | Self::Alac { depth } | Self::Pcm { depth } => Some(depth),
+            _ => None,
+        }
+    }
+}
+
+impl Transcode {
+    /// The bitrates offered as a ceiling, highest first.
+    pub const BITRATES: [u32; 7] = [320, 256, 192, 160, 128, 96, 64];
+}
+
+/// A lossy format a streaming server can convert a track into before sending it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Codec {
+    Mp3,
+    Opus,
+    Aac,
+}
+
+impl Codec {
+    pub const ALL: [Self; 3] = [Self::Mp3, Self::Opus, Self::Aac];
+
+    /// The name Subsonic servers know the format by, which is also how settings store it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Mp3 => "mp3",
+            Self::Opus => "opus",
+            Self::Aac => "aac",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|codec| codec.id() == id)
+    }
 }
 
 /// What an engine reports back. `Playing` and `Seeked` mean audio from `at` is reaching the
@@ -388,6 +587,12 @@ pub enum PlaybackEvent {
     Refused,
     Gated,
     OutputChanged,
+    /// What the engine knows about the sound of track `id`, sent as it starts decoding it. A
+    /// track queued behind the current one reports before it is heard.
+    Signal {
+        id: String,
+        track: TrackSignal,
+    },
 }
 
 impl PlaybackEvent {
@@ -403,6 +608,7 @@ impl PlaybackEvent {
             | Self::Ended { id, .. }
             | Self::Unavailable { id, .. }
             | Self::Throttled { id } => id.as_deref(),
+            Self::Signal { id, .. } => Some(id),
             _ => None,
         }
     }
@@ -432,11 +638,64 @@ pub trait Player: Send + Sync {
     fn spectrum(&self) -> Option<Spectrum> {
         None
     }
+
+    /// Fetches all of a track into the downloads without playing it. The future answers once it
+    /// is kept, or why it could not be. A player that cannot download says so at once.
+    /// `progress` follows how much of it has arrived.
+    fn download(
+        &self,
+        _track_id: &str,
+        _progress: Fraction,
+    ) -> futures::future::BoxFuture<'static, Result<()>> {
+        Box::pin(async { Err(anyhow::anyhow!("this player cannot download")) })
+    }
+
+    /// Whether a track has been downloaded.
+    fn downloaded(&self, _track_id: &str) -> bool {
+        false
+    }
+
+    /// Whether a track plays with no network, which only a download can. While the vault is
+    /// still unlocking, a player whose downloads play offline answers yes for every track, since
+    /// it cannot tell yet which are downloaded, so the caller checks its own list then.
+    fn plays_offline(&self, track_id: &str) -> bool {
+        self.downloaded(track_id)
+    }
+
+    /// Removes the download of a track.
+    fn discard(&self, _track_id: &str) {}
 }
 
 #[async_trait]
 pub trait PlaybackEvents: Send {
     async fn next(&mut self) -> Option<PlaybackEvent>;
+}
+
+/// How far a download has got, from 0 to 1, shared between the player that fetches it and the
+/// app that shows it. It reads `None` until the player can tell.
+#[derive(Clone, Debug)]
+pub struct Fraction(Arc<std::sync::atomic::AtomicU32>);
+
+impl Default for Fraction {
+    fn default() -> Self {
+        Self(Arc::new(std::sync::atomic::AtomicU32::new(
+            f32::NAN.to_bits(),
+        )))
+    }
+}
+
+impl Fraction {
+    pub fn get(&self) -> Option<f32> {
+        let value = f32::from_bits(self.0.load(std::sync::atomic::Ordering::Relaxed));
+        (!value.is_nan()).then_some(value)
+    }
+
+    pub fn set(&self, value: f32) {
+        self.0.store(
+            value.clamp(0.0, 1.0).to_bits(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 }
 
 pub trait PlaybackFactory: Send + Sync {
@@ -449,9 +708,32 @@ pub trait PlaybackFactory: Send + Sync {
 pub enum Shape {
     /// The library is what the user starred, read through the `saved_*` methods.
     Saved,
-    /// The library is everything the provider has, read through the `all_*` methods, with the
-    /// `saved_*` set drawn on top as hearts and a filter.
-    Catalog,
+    /// The library is a catalog read through the `all_*` methods, with the `saved_*` set drawn
+    /// on top as hearts and a filter.
+    Catalog(Catalog),
+}
+
+impl Shape {
+    pub fn is_catalog(self) -> bool {
+        matches!(self, Self::Catalog(_))
+    }
+
+    /// Whether the listener can put things into the library and take them out, apart from
+    /// favoriting them.
+    pub fn editable(self) -> bool {
+        self == Self::Catalog(Catalog::Editable)
+    }
+}
+
+/// Whether the listener can change what a catalog holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Catalog {
+    /// Everything the provider has, which changes only with the files behind it, as with local
+    /// files and a self-hosted server.
+    Fixed,
+    /// A set the listener picked out of a bigger catalog, which tracks and albums are put into
+    /// and taken out of through `set_in_library`, as on Apple Music.
+    Editable,
 }
 
 /// What a provider can do beyond listing and playing, so a control it has no answer for is
@@ -476,6 +758,20 @@ pub struct Capabilities {
     /// The provider keeps sidebar pins of its own, listed by `pin_targets` and changed
     /// through `set_pinned`. Off, a pin lives in Sonora's settings alone.
     pub pins: bool,
+    /// The server converts tracks on request, as [`Transcode`] asks.
+    pub transcode: bool,
+    /// Played tracks can be kept in the [`vault`], so playing one again downloads nothing.
+    pub keeps: bool,
+    /// Tracks can be downloaded. Whether a download then plays with no network is up to the
+    /// player, through [`Player::plays_offline`].
+    pub downloads: bool,
+    /// The stream levels the service serves, best first. Empty when there is nothing to choose
+    /// between, so the setting stays hidden.
+    pub qualities: &'static [Offer],
+    /// For a service that refuses a burst of downloads, the pause between them once it has refused
+    /// one. Such a service downloads one track at a time, with no pause until it first refuses.
+    /// Zero lets downloads run side by side.
+    pub download_gap: Duration,
 }
 
 impl Capabilities {
@@ -483,20 +779,30 @@ impl Capabilities {
     /// them: on most services the two are one thing. Pins of the provider's own are not
     /// either, since no provider left keeps any.
     pub const ALL: Self = Self {
+        library: true,
         follow_artists: true,
         radio: true,
         playcounts: true,
-        library: false,
         pins: false,
+        transcode: false,
+        keeps: true,
+        downloads: true,
+        qualities: &[],
+        download_gap: Duration::ZERO,
     };
 
     /// Nothing beyond listing and playing.
     pub const NONE: Self = Self {
+        library: false,
         follow_artists: false,
         radio: false,
         playcounts: false,
-        library: false,
         pins: false,
+        transcode: false,
+        keeps: false,
+        downloads: false,
+        qualities: &[],
+        download_gap: Duration::ZERO,
     };
 }
 
@@ -533,6 +839,19 @@ pub enum SignInProblem {
     Cancelled,
     Refused,
 }
+
+/// A provider refusing for now because too much was asked of it too quickly. Whoever asked can
+/// try again later, and finds this in the error's chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Throttled;
+
+impl std::fmt::Display for Throttled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the provider is refusing for now")
+    }
+}
+
+impl std::error::Error for Throttled {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SignInFailure(pub SignInProblem);
@@ -673,6 +992,19 @@ pub trait MusicProvider: Send + Sync {
     fn reach(&self) -> Option<String> {
         None
     }
+    /// A playback factory built from the stored sign-in alone, with no network, for a provider
+    /// whose downloads play offline. The session starts it when the account cannot be reached,
+    /// inside the app's tokio runtime.
+    fn offline_playback(&self) -> Option<Arc<dyn PlaybackFactory>> {
+        None
+    }
+    /// What `link` points at when it is one of this provider's own, on its website or in its
+    /// app's scheme. It reads the text alone and fetches nothing, so a short link comes back as
+    /// `Linked::Short` for the caller to follow and ask again.
+    fn link(&self, _link: &str) -> Option<link::Linked> {
+        None
+    }
+
     async fn restore(&self) -> Result<Option<ProviderSession>>;
     async fn sign_in(
         &self,
@@ -689,10 +1021,74 @@ pub trait MusicProvider: Send + Sync {
     }
 }
 
+/// Leniently convert an ISO8601 timestamp to unix epoch seconds. Accepts only
+/// the date portion, date and time portions, or full date and time with offset.
+pub fn iso_8601_to_epoch(value: Option<&str>) -> Option<i64> {
+    let time_str = value?.as_bytes();
+    let defaults = Parsed::new()
+        .with_month(Month::January)
+        .and_then(|d| d.with_day(NonZero::<u8>::new(1)?))
+        .and_then(|d| d.with_hour_24(0))
+        .and_then(|d| d.with_minute(0))
+        .and_then(|d| d.with_second(0))
+        .and_then(|d| d.with_subsecond(0))
+        .and_then(|d| d.with_offset_hour(0))
+        .and_then(|d| d.with_offset_minute_signed(0))
+        .and_then(|d| d.with_offset_second_signed(0))?;
+    let timestamp = OffsetDateTime::parse_with_defaults(time_str, &Iso8601::PARSING, defaults)
+        .ok()?
+        .unix_timestamp();
+    Some(timestamp)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::is_local_id;
+    use time::macros::datetime;
 
+    use super::*;
+
+    #[test]
+    fn iso_8601_to_epoch_parses_correctly() {
+        // None and malformed input
+        assert_eq!(iso_8601_to_epoch(None), None);
+        assert_eq!(iso_8601_to_epoch(Some("")), None);
+        assert_eq!(iso_8601_to_epoch(Some("malformed")), None);
+
+        // Basic epoch format
+        assert_eq!(iso_8601_to_epoch(Some("1970-01-01")), Some(0));
+        assert_eq!(iso_8601_to_epoch(Some("1970-01-01T00:00:00")), Some(0));
+        assert_eq!(iso_8601_to_epoch(Some("1970-01-01T00:00:00Z")), Some(0));
+        assert_eq!(
+            iso_8601_to_epoch(Some("1970-01-01T00:00:00+00:00")),
+            Some(0)
+        );
+
+        // A specific date with/without time/offset
+        assert_eq!(
+            iso_8601_to_epoch(Some("2021-03-20")),
+            Some(datetime!(2021-03-20 00:00:00 UTC).unix_timestamp())
+        );
+        assert_eq!(
+            iso_8601_to_epoch(Some("2021-03-20T13:45:07")),
+            Some(datetime!(2021-03-20 13:45:07 UTC).unix_timestamp())
+        );
+        assert_eq!(
+            iso_8601_to_epoch(Some("2021-03-20T13:45:07.123456")),
+            Some(datetime!(2021-03-20 13:45:07 UTC).unix_timestamp())
+        );
+        assert_eq!(
+            iso_8601_to_epoch(Some("2021-03-20T13:45:07Z")),
+            Some(datetime!(2021-03-20 13:45:07 UTC).unix_timestamp())
+        );
+        assert_eq!(
+            iso_8601_to_epoch(Some("2021-03-20T13:45:07+00:00")),
+            Some(datetime!(2021-03-20 13:45:07 UTC).unix_timestamp())
+        );
+        assert_eq!(
+            iso_8601_to_epoch(Some("2021-03-20T10:45:07-03:00")),
+            Some(datetime!(2021-03-20 13:45:07 UTC).unix_timestamp())
+        );
+    }
     #[test]
     fn local_ids_cover_every_local_kind() {
         for id in [

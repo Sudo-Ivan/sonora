@@ -25,7 +25,10 @@ impl Cover {
             .detach();
         cx.subscribe(&session, |this, _, event, cx| match event {
             SessionEvent::SignedOut => this.forget(cx),
-            SessionEvent::SignedIn | SessionEvent::Reconnected | SessionEvent::LocalChanged => {}
+            SessionEvent::SignedIn
+            | SessionEvent::Reconnected
+            | SessionEvent::WentOffline
+            | SessionEvent::LocalChanged => {}
         })
         .detach();
 
@@ -45,7 +48,7 @@ impl Cover {
     }
 
     /// Returns the large artwork only when it belongs to `album`.
-    pub(crate) fn large_for(&self, album: &str) -> Option<&str> {
+    pub fn large_for(&self, album: &str) -> Option<&str> {
         self.large
             .as_deref()
             .filter(|_| self.album.as_deref() == Some(album))
@@ -63,8 +66,8 @@ impl Cover {
         let album = self
             .playback
             .read(cx)
-            .track()
-            .and_then(|track| track.album_id.clone());
+            .shown_track(cx)
+            .and_then(|track| track.album_id);
         if album == self.album {
             return;
         }

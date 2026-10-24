@@ -2,64 +2,81 @@ mod artist;
 mod catalog;
 mod cover;
 mod detail;
+mod downloads;
+mod equalizer;
 mod genre;
 mod history;
 mod home;
 mod library;
+mod links;
 mod logging;
 mod lyrics;
 mod mix;
 mod mosaic;
 mod network;
+mod outputs;
+mod overload;
 mod pins;
 mod playback;
 mod profile;
 mod queue;
 mod remote;
+mod requirements;
 mod scan;
 mod scrobble;
 mod search;
 mod session;
 mod settings;
 mod sheets;
+mod signal;
 mod snapshot;
 mod song;
 mod tags;
 mod toast;
 mod updates;
+mod vault;
 mod wake;
 mod window_shape;
 
 pub use artist::{ArtistDetail, ArtistDetailEvent};
 pub use cover::Cover;
 pub use detail::{Collection, Detail, Header};
+pub use downloads::{Downloads, DownloadsChanged, Progress, downloaded};
+pub use equalizer::{DeviceRule, Equalizer, RuleDevice, Sound};
 pub use genre::{GenreDetails, Genres};
 pub use history::{History, HistoryState};
 pub use home::Home;
 pub use library::{
     Addition, Ignore, Library, LibraryEvent, LibraryPart, LibraryState, Problem, Ready, Shelf,
 };
+pub use links::{Links, Opened};
 pub use logging::log_file;
 pub use lyrics::{Lyrics, LyricsState};
 pub use mix::Mix;
 pub use network::{Network, Reconnected};
+pub use outputs::Outputs;
+pub use overload::OutputLevel;
 pub use pins::{PinSort, Pins};
-pub use playback::{Origin, Playback, PlaybackState, Repeat, Sleep, Whence};
+pub use playback::{Origin, Playback, PlaybackState, Repeat, Sleep, Unreachable, Whence};
 pub use profile::Profile;
 pub use queue::{Named, Queue, Resume, Stub};
 pub use remote::{Remote, attach as attach_remote};
+pub use requirements::{Requirement, Requirements};
 pub use scan::Scan;
 pub use scrobble::{ScrobbleRow, ScrobbleState, Scrobbling};
 pub use search::{AlbumHit, ArtistHit, Hit, Kind, PlaylistHit, Search};
 pub use session::{Failure, ProviderInfo, Session, SessionEvent, SessionState};
 pub use settings::{
-    AppSettings, FilterValue, FullscreenControlsAutohide, Reloaded, RomanizationScripts,
-    SYSTEM_FONT, SideTab, remember_window, window_placement,
+    AppSettings, FilterValue, FullscreenControlsAutohide, LYRICS_SOURCES, PlayerBarLayout,
+    Reloaded, RomanizationScripts, SYSTEM_FONT, SideTab, ThemeFamily, ThemeVariant,
+    equalizer_profile_label, remember_window, window_placement,
 };
+pub use signal::{Change, Equalizing, FLOAT_BITS, Following, Signal, SignalPath};
 pub use song::SongDetail;
 pub use tags::{TagState, Tags};
-pub use toast::{Outcome, Target, Toast, Toasts};
+pub use toast::{Outcome, Target, Toast, ToastAction, Toasts};
 pub use updates::{Release, UpdateState, Updates};
+pub use vault::CACHE_GB_RANGE;
 pub use wake::Wake;
 pub use window_shape::{apply_window_rounding, install_rounded_window_hook};
 
@@ -161,16 +178,22 @@ pub(crate) fn settled<T>(result: Result<T>, cx: &mut gpui::App) -> std::result::
 pub struct Sonora {
     pub session: Entity<Session>,
     pub cover: Entity<Cover>,
+    pub downloads: Entity<Downloads>,
+    pub equalizer: Entity<Equalizer>,
     pub library: Entity<Library>,
+    pub links: Entity<Links>,
     pub history: Entity<History>,
     pub lyrics: Entity<Lyrics>,
     pub network: Entity<Network>,
+    pub outputs: Entity<Outputs>,
     pub pins: Entity<Pins>,
     pub playback: Entity<Playback>,
     pub queue: Entity<Queue>,
+    pub requirements: Entity<Requirements>,
     pub scan: Entity<Scan>,
     pub scrobbling: Entity<Scrobbling>,
     pub settings: Entity<AppSettings>,
+    pub signal: Entity<Signal>,
     pub updates: Entity<Updates>,
     pub wake: Entity<Wake>,
 }
@@ -214,9 +237,15 @@ pub fn init(
         settings.report_broken(cx);
         settings
     });
+    // A provider sets up its own file cache when its session opens, which can be before Playback
+    // exists, so it hears the setting first.
+    music::vault::Vault::set_keeping(
+        settings.read(cx).keep_tracks(),
+        vault::bytes(settings.read(cx).cache_gb()),
+    );
     let session =
         cx.new(|cx| Session::new(providers, local_provider, settings.clone(), io.clone(), cx));
-    let network = cx.new(|_| Network::new(session.clone(), io.clone()));
+    let network = cx.new(|cx| Network::new(session.clone(), settings.clone(), io.clone(), cx));
     // A run that started without a network never signed out, so the account it kept is tried
     // again the moment there is one.
     session.update(cx, |_, cx| {
@@ -225,10 +254,43 @@ pub fn init(
         })
         .detach();
     });
+    // A toast can carry an Undo that acts on the account it was shown for, so no such toast
+    // outlives it. A plain one stays, since the sign-out can be what it explains.
+    cx.subscribe(&session, |_, event, cx| {
+        if let SessionEvent::SignedOut = event {
+            Toasts::clear_account(cx);
+        }
+    })
+    .detach();
     let cache = storage::Cache::standard();
     let library = cx.new(|cx| Library::new(session.clone(), io.clone(), cache, cx));
     let queue = cx.new(|cx| Queue::new(session.clone(), settings.clone(), cx));
-    let playback = cx.new(|cx| Playback::new(session.clone(), queue.clone(), settings.clone(), cx));
+    // Playback starts no engine until a provider is up, so the saved device is handed over
+    // before any stream opens.
+    let equalizer = cx.new(|cx| Equalizer::new(settings.clone(), cx));
+    let playback = cx.new(|cx| {
+        Playback::new(
+            session.clone(),
+            queue.clone(),
+            settings.clone(),
+            &equalizer,
+            cx,
+        )
+    });
+    let outputs = cx.new(|cx| Outputs::new(settings.clone(), playback.clone(), cx));
+    let downloads = cx.new(|cx| {
+        Downloads::new(
+            session.clone(),
+            playback.clone(),
+            &network,
+            database.clone(),
+            io.clone(),
+            cx,
+        )
+    });
+    equalizer.update(cx, |equalizer, cx| {
+        equalizer.follow(&playback, &outputs, cx)
+    });
     let history = cx.new(|cx| {
         History::new(
             session.clone(),
@@ -261,22 +323,39 @@ pub fn init(
     });
     let cover = cx.new(|cx| Cover::new(session.clone(), playback.clone(), io.clone(), cx));
     let updates = cx.new(|cx| Updates::new(settings.clone(), io.clone(), cx));
+    let requirements = cx.new(|cx| {
+        Requirements::new(
+            settings.clone(),
+            session.clone(),
+            outputs.clone(),
+            io.clone(),
+            cx,
+        )
+    });
     let pins = cx.new(|cx| Pins::new(settings.clone(), library.clone(), session.clone(), cx));
+    let signal = cx.new(|cx| Signal::new(playback.clone(), outputs.clone(), equalizer.clone(), cx));
     let wake = cx.new(|cx| Wake::new(settings.clone(), playback.clone(), io.clone(), cx));
+    let links = cx.new(|cx| Links::new(session.clone(), cx));
 
     cx.set_global(Sonora {
         session,
         cover,
+        downloads,
+        equalizer,
         library,
+        links,
         history,
         lyrics,
         network,
+        outputs,
         pins,
         playback,
         queue,
+        requirements,
         scan,
         scrobbling,
         settings,
+        signal,
         updates,
         wake,
     });
