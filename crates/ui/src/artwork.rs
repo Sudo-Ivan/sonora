@@ -1155,9 +1155,122 @@ fn blank(size: Pixels, rounded: Pixels, muted: Hsla, glyph: Hsla, fallback: Shar
 }
 
 #[cfg(test)]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
+
+    use dhat::HeapStats;
+    use gpui::TestAppContext;
     use image::{Delay, Rgba, codecs::gif::GifEncoder};
+
+    /// The dhat profiler, held for the life of the test binary since it allows only one.
+    fn profiler() -> &'static dhat::Profiler {
+        static PROFILER: OnceLock<dhat::Profiler> = OnceLock::new();
+        PROFILER.get_or_init(|| dhat::Profiler::builder().testing().build())
+    }
+
+    /// Pushes 5,000 failed decodes through `insert`, the same path a cover that cannot be
+    /// fetched takes, and checks the maps stay bounded and nothing is retained across runs.
+    /// Then checks `trim_tints` really bounds `tints`: it keeps every palette whose cover is
+    /// still live, so its ceiling is the number of live covers, not `TINT_ITEMS`.
+    #[test]
+    fn artwork_cache_bounds() {
+        let _ = profiler();
+        let cx = TestAppContext::single();
+        let cache = cx.update(|cx| ArtworkCache::entity(cx));
+
+        let insert = |cx: &TestAppContext, cache: &Entity<ArtworkCache>, n: usize| {
+            for i in 0..n {
+                let key = (resource(format!("art://cover/{i}")), 64);
+                cx.update(|app| {
+                    cache.update(app, |cache, cx| {
+                        cache.insert(key, Err(ImageCacheError::Asset("gone".into())), cx);
+                    });
+                });
+            }
+        };
+
+        insert(&cx, &cache, 5_000);
+        let counts = cx.read(|app| {
+            let cache = cache.read(app);
+            (
+                cache.items.len(),
+                cache.condemned.len(),
+                cache.pending.len(),
+                cache.tints.len(),
+            )
+        });
+        println!(
+            "ALLOC artwork_items={} condemned={} pending={} tints={}",
+            counts.0, counts.1, counts.2, counts.3
+        );
+        assert!(
+            counts.0 <= CACHE_ITEMS,
+            "items grew past CACHE_ITEMS: {}",
+            counts.0
+        );
+        // condemned only clears on a redraw flush, which needs a window; without one it
+        // holds everything items dropped, so the entry-count bound on the pair is the
+        // number of inserts. Nothing retained is larger than a key plus a hundred bytes.
+        assert!(
+            counts.1 <= 5_000 && counts.0 + counts.1 <= 5_256,
+            "items+condemned grew unboundedly: {counts:?}"
+        );
+        assert_eq!(counts.2, 0, "pending was not drained");
+        assert_eq!(counts.3, 0, "failed decodes must not tint");
+
+        // a second identical pass must not grow the heap
+        let before = HeapStats::get();
+        insert(&cx, &cache, 5_000);
+        let after = HeapStats::get();
+        let kept = after.curr_bytes.saturating_sub(before.curr_bytes);
+        println!(
+            "ALLOC artwork_kept={kept} base={} last={}",
+            before.curr_bytes, after.curr_bytes
+        );
+        assert!(
+            kept <= 512 * 1024,
+            "a second pass of 5,000 inserts kept {kept} bytes"
+        );
+
+        // tints: palettes for live covers survive a trim, dead ones go
+        cx.update(|app| {
+            cache.update(app, |cache, _cx| {
+                let palette = CoverPalette {
+                    primary: None,
+                    secondary: None,
+                    lightness: 0.5,
+                };
+                for i in 0..TINT_ITEMS + 10 {
+                    cache
+                        .tints
+                        .insert(resource(format!("art://tint/{i}")), palette);
+                }
+                cache.trim_tints();
+                assert_eq!(
+                    cache.tints.len(),
+                    0,
+                    "tints with no live covers must all leave"
+                );
+                // every live cover keeps its palette, even past TINT_ITEMS
+                let live: Vec<Resource> = cache.items.keys().map(|key| key.0.clone()).collect();
+                for resource in &live {
+                    cache.tints.insert(resource.clone(), palette);
+                }
+                for i in 0..TINT_ITEMS {
+                    cache
+                        .tints
+                        .insert(resource(format!("art://dead/{i}")), palette);
+                }
+                cache.trim_tints();
+                assert_eq!(cache.tints.len(), live.len());
+            });
+        });
+    }
 
     #[test]
     fn artwork_loader_targets_the_requested_edge() {

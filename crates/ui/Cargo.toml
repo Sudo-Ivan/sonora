@@ -26,4 +26,5 @@ ashpd.workspace = true
 
 [dev-dependencies]
 dhat.workspace = true
+gpui = { workspace = true, features = ["test-support"] }
 gpui_platform.workspace = true

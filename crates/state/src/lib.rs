@@ -360,3 +360,10 @@ pub fn init(
         wake,
     });
 }
+
+#[cfg(test)]
+mod memtest;
+
+#[cfg(test)]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
