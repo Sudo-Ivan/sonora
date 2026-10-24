@@ -8,6 +8,9 @@ license.workspace = true
 # the gpui frame overlay and repaint wash, off in normal builds
 profiler = ["gpui/profiler"]
 bundled-sqlite = ["state/bundled-sqlite"]
+# a dhat-heap.json dump of live allocations at exit, off in normal builds
+dhat-heap = ["dep:dhat"]
+dhat = ["dep:dhat"]
 
 [dependencies]
 anyhow.workspace = true
@@ -35,6 +38,7 @@ sha2.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 interprocess.workspace = true
 image.workspace = true
+dhat = { version = "0.3.3", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock.workspace = true

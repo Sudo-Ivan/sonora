@@ -40,7 +40,13 @@ const FIRST_SIZE: Size<Pixels> = size(px(920.), px(640.));
 /// they land as one batch instead of racing each other into the engine one at a time.
 const OPEN_COALESCE: Duration = Duration::from_millis(250);
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
     memory::tune();
     memory::cap_pools();
     if let Some(code) = webview::probed() {
