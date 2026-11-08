@@ -7,6 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Scanning a library that contains folder symlink loops no longer duplicates every track or
+  exhausts memory; the walk now visits each folder once and stops at sane limits.
+- Large untagged or unreadable files no longer load entirely into memory while scanning, and
+  oversized embedded covers are skipped instead of cached.
+
 ## [0.45.0] - 2026-10-24
 
 ### Added

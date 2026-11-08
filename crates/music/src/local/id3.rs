@@ -1,5 +1,10 @@
 use std::fs;
+use std::io::Read as _;
 use std::path::Path;
+
+/// The biggest ID3 tag worth pulling into memory. Past it the file is left to the other readers
+/// rather than having its contents buffered whole.
+const MAX_TAG_BYTES: usize = 64 * 1024 * 1024;
 
 /// The handful of ID3v2 fields worth recovering when neither `lofty` nor `symphonia` could open
 /// the tag at all.
@@ -27,25 +32,35 @@ pub struct Lenient {
 /// unsynchronisation - none of which showed up in the files this was written for. A tag using
 /// any of them is left exactly as `lofty`/`symphonia` already leave it.
 pub fn read(path: &Path) -> Option<Lenient> {
-    let data = fs::read(path).ok()?;
-    if data.len() < 10 || &data[0..3] != b"ID3" {
+    let mut file = fs::File::open(path).ok()?;
+    let mut header = [0; 10];
+    file.read_exact(&mut header).ok()?;
+    if &header[0..3] != b"ID3" {
         return None;
     }
 
-    let major = data[3];
+    let major = header[3];
     if major != 3 && major != 4 {
         return None;
     }
-    let flags = data[5];
+    let flags = header[5];
     if flags & 0x80 != 0 || flags & 0x40 != 0 {
         return None;
     }
 
-    let tag_size = syncsafe(&data[6..10]) as usize;
-    let end = (10 + tag_size).min(data.len());
+    let tag_size = syncsafe(&header[6..10]) as usize;
+    if tag_size > MAX_TAG_BYTES {
+        return None;
+    }
+    // Only the tag is buffered, never the audio around it; a file that ends early still parses
+    // whatever frames did arrive, exactly as reading it whole did.
+    let mut data = Vec::new();
+    file.take(tag_size as u64).read_to_end(&mut data).ok()?;
+
+    let end = data.len();
 
     let mut lenient = Lenient::default();
-    let mut pos = 10;
+    let mut pos = 0;
     while pos + 10 <= end {
         let id = &data[pos..pos + 4];
         if id == [0, 0, 0, 0] {

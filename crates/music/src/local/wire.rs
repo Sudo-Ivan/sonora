@@ -55,6 +55,10 @@ const PLAYABLE_EXTENSIONS: &[&str] = &[
     "mka", "wv", "ape",
 ];
 
+/// The biggest cover image worth writing to the cache. Past it the tag's picture is dropped
+/// rather than stored whole.
+const MAX_COVER_BYTES: usize = 32 * 1024 * 1024;
+
 /// Chooses the track or album artist keys when reading a tag's list of names.
 enum Field {
     TrackArtist,
@@ -774,6 +778,13 @@ fn cache_picture(picture: &Picture, cache_dir: &Path) -> Option<String> {
 
 fn cache_image_data(data: &[u8], media_type_or_ext: &str, cache_dir: &Path) -> Option<String> {
     if data.is_empty() {
+        return None;
+    }
+    if data.len() > MAX_COVER_BYTES {
+        log::debug!(
+            "local: dropping a {} byte cover over the {MAX_COVER_BYTES} byte limit",
+            data.len()
+        );
         return None;
     }
 

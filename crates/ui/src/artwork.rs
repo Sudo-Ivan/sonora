@@ -43,6 +43,11 @@ const MAX_SAMPLE_EDGE: u32 = 4096;
 const EDGE_STEP: u32 = 64;
 /// The edge a cover is decoded at when only its palette is wanted.
 const PALETTE_EDGE: u32 = 128;
+/// The largest edge an artwork decode accepts. A cover past it fails the decode rather than
+/// letting a decompression bomb allocate pixels no screen could show.
+const MAX_IMAGE_EDGE: u32 = 16384;
+/// The most memory one artwork decode may allocate, in the decoder's own accounting.
+const MAX_DECODE_ALLOC: u64 = 512 * 1024 * 1024;
 const GRACE: Duration = Duration::from_secs(5);
 const KEEP_ITEMS: usize = 96;
 const IDLE: Duration = Duration::from_secs(120);
@@ -222,6 +227,16 @@ fn decoders() -> mpsc::Sender<Job> {
     sender
 }
 
+/// The limits every artwork decoder runs under, so a corrupt or hostile cover errors the
+/// decode instead of growing memory without bound.
+fn decode_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_EDGE);
+    limits.max_image_height = Some(MAX_IMAGE_EDGE);
+    limits.max_alloc = Some(MAX_DECODE_ALLOC);
+    limits
+}
+
 fn raster_frames(
     bytes: &[u8],
     format: ImageFormat,
@@ -247,6 +262,7 @@ fn raster_frames(
 }
 
 fn static_frame(mut decoder: impl ImageDecoder, edge: u32) -> Result<Vec<Frame>, ImageCacheError> {
+    decoder.set_limits(decode_limits())?;
     let orientation = decoder.orientation()?;
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
@@ -254,9 +270,10 @@ fn static_frame(mut decoder: impl ImageDecoder, edge: u32) -> Result<Vec<Frame>,
 }
 
 fn animated_frames<'a>(
-    decoder: impl AnimationDecoder<'a>,
+    mut decoder: impl AnimationDecoder<'a> + ImageDecoder,
     edge: u32,
 ) -> Result<Vec<Frame>, ImageCacheError> {
+    decoder.set_limits(decode_limits())?;
     let mut frames = Vec::new();
     for frame in decoder.into_frames() {
         match frame {

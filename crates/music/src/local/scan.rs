@@ -13,6 +13,12 @@ const SEPARATORS: [char; 8] = ['-', '-', '-', '.', '_', '·', ':', ' '];
 /// How many threads read tags at once. Past this a spinning disk seeks more than it reads.
 const MAX_READERS: usize = 8;
 
+/// How deep the folder walk may descend. A symlink loop cannot grow the tree past it.
+const MAX_DEPTH: usize = 64;
+
+/// The most files and folders one scan collects. Past it the walk stops and keeps what it has.
+const MAX_ENTRIES: usize = 2_000_000;
+
 const AUDIO_EXTENSIONS: &[&str] = &[
     "mp3", "flac", "m4a", "mp4", "aac", "ogg", "oga", "opus", "wav", "aiff", "aif", "aifc", "wv",
     "ape", "webm", "mka",
@@ -80,6 +86,54 @@ pub(super) struct Look {
     pub fresh: bool,
 }
 
+/// Everything the walk gathers, shared by every root so the caps and the visited-folder set
+/// cover the whole scan and not one tree at a time.
+#[derive(Default)]
+struct Walked {
+    files: Vec<Found>,
+    folders: Vec<Folder>,
+    playlists: Vec<PathBuf>,
+    guard: Guard,
+}
+
+impl Walked {
+    /// Whether collecting may go on: under the entry cap and not already stopped by one.
+    fn room(&mut self) -> bool {
+        if self.guard.capped {
+            return false;
+        }
+        if self.files.len() + self.folders.len() >= MAX_ENTRIES {
+            self.guard.cap(format_args!(
+                "the walk found more than {MAX_ENTRIES} files and folders"
+            ));
+            return false;
+        }
+        true
+    }
+}
+
+/// Where the walk has already been and when it must stop. A folder's identity is its canonical
+/// path, so a symlink cannot walk the same folder twice; the caps keep a pathological tree —
+/// loops aside, a deep or enormous share — from growing the scan without bound.
+#[derive(Default)]
+struct Guard {
+    /// The canonical path of every folder already walked.
+    seen: HashSet<PathBuf>,
+    /// Whether a cap has already been reported, so one scan says it once.
+    capped: bool,
+}
+
+impl Guard {
+    /// Stops the walk for good, reporting the cap that ended it the first time only.
+    fn cap(&mut self, why: std::fmt::Arguments<'_>) {
+        if self.capped {
+            return;
+        }
+        self.capped = true;
+        log::warn!("local: {why}; the scan keeps what it found");
+    }
+}
+
 /// Scans every root and merges the results into one library: tracks are collected from all
 /// roots before albums/artists are grouped, so the same artist or album spread across more
 /// than one folder still merges into a single entry, seamlessly.
@@ -95,39 +149,33 @@ pub fn scan(roots: &[PathBuf], cache_dir: &Path, index: &Index) -> Scanned {
     let mut scanned = Scanned::default();
     let remembered = index.load();
 
-    let mut files = Vec::new();
-    let mut folders = Vec::new();
-    let mut playlist_files = Vec::new();
+    let mut gathered = Walked::default();
     let mut reached = Vec::new();
     for root in roots {
         if root.is_dir() {
             reached.push(root.clone());
-            walk(
-                root,
-                &remembered,
-                &mut files,
-                &mut folders,
-                &mut playlist_files,
-                &progress,
-            );
+            // A root that resolves to itself lets the walk skip re-resolving every real folder
+            // below it; anything else is resolved per folder like a symlinked child.
+            let canonical = std::fs::canonicalize(root).ok().as_deref() == Some(root.as_path());
+            walk(root, canonical, 0, &remembered, &mut gathered, &progress);
         }
     }
-    let found = files.len();
+    let found = gathered.files.len();
     // Every folder is looked at again for an artist portrait, so the count covers both passes
     // and the percentage does not sit at full while the second one runs.
-    progress.found(found + folders.len());
+    progress.found(found + gathered.folders.len());
     let walked = started.elapsed();
     if !progress.live() {
         return scanned;
     }
 
-    let readings = read_tags(&files, &remembered, roots, cache_dir, &progress);
+    let readings = read_tags(&gathered.files, &remembered, roots, cache_dir, &progress);
     let read = started.elapsed();
     if !progress.live() {
         return scanned;
     }
 
-    let looks = look_for_portraits(&folders, &remembered, &readings, &progress);
+    let looks = look_for_portraits(&gathered.folders, &remembered, &readings, &progress);
     if !progress.live() {
         return scanned;
     }
@@ -140,13 +188,13 @@ pub fn scan(roots: &[PathBuf], cache_dir: &Path, index: &Index) -> Scanned {
     scanned.artists = group_artists(&parsed, &scanned.portraits, &scanned.albums);
     scanned.tracks = parsed.into_iter().map(|tagged| tagged.track).collect();
     index.save(&changes);
-    scanned.playlists = read_playlists(&playlist_files, &scanned.tracks);
+    scanned.playlists = read_playlists(&gathered.playlists, &scanned.tracks);
 
     log::debug!(
         "local: scanned {found} files and {} folders in {}ms \
          ({}ms walking, {}ms reading {opened} changed tags, {}ms portraits), \
          {} tracks over {} albums",
-        folders.len(),
+        gathered.folders.len(),
         started.elapsed().as_millis(),
         walked.as_millis(),
         (read - walked).as_millis(),
@@ -442,19 +490,44 @@ fn group_artists(
 /// portraits in. A folder whose time matches the index is listed from memory: no listing of it,
 /// and no stat for any file in it but one whose stored row no longer parses. Children come out
 /// sorted either way, so the library holds the same order whichever path a folder took.
+///
+/// `canonical` says `dir`'s path is already canonical, which saves the resolve the dedupe needs;
+/// it is only ever true for a real folder under a canonical parent, since a symlinked ancestor
+/// leaves every path below it non-canonical. `depth` counts the folders above `dir`.
 fn walk(
     dir: &Path,
+    canonical: bool,
+    depth: usize,
     remembered: &Remembered,
-    files: &mut Vec<Found>,
-    folders: &mut Vec<Folder>,
-    playlists: &mut Vec<PathBuf>,
+    out: &mut Walked,
     progress: &progress::Scan,
 ) {
+    if depth >= MAX_DEPTH {
+        out.guard.cap(format_args!(
+            "the walk nested deeper than {MAX_DEPTH} folders"
+        ));
+        return;
+    }
+    if !out.room() {
+        return;
+    }
     let Some((mtime, _)) = stat(dir) else {
         return;
     };
+    // A folder is its canonical path: a symlink loop or two links naming one folder must not
+    // list it twice, and whichever spelling the walk meets first is the one it keeps.
+    let key = match canonical {
+        true => dir.to_path_buf(),
+        false => match std::fs::canonicalize(dir) {
+            Ok(key) => key,
+            Err(_) => return,
+        },
+    };
+    if !out.guard.seen.insert(key) {
+        return;
+    }
     let known = remembered.unchanged(dir, mtime);
-    folders.push(Folder {
+    out.folders.push(Folder {
         path: dir.to_path_buf(),
         mtime,
         known,
@@ -466,6 +539,9 @@ fn walk(
                 return;
             };
             for path in &children.files {
+                if !out.room() {
+                    return;
+                }
                 let found = match remembered.files.get(path) {
                     Some(known) => Found {
                         path: path.clone(),
@@ -485,36 +561,44 @@ fn walk(
                         }
                     }
                 };
-                files.push(found);
+                out.files.push(found);
             }
             for child in &children.folders {
                 if !progress.live() {
                     return;
                 }
-                walk(child, remembered, files, folders, playlists, progress);
+                // Index paths cannot prove they are canonical, so each is resolved afresh.
+                walk(child, false, depth + 1, remembered, out, progress);
             }
         }
         false => {
             let Ok(read) = std::fs::read_dir(dir) else {
                 return;
             };
-            let mut here: Vec<(PathBuf, bool)> = read
+            let mut here: Vec<(PathBuf, bool, bool)> = read
                 .filter_map(|entry| entry.ok())
                 .map(|entry| {
                     let path = entry.path();
-                    let folder = is_folder(&entry, &path);
-                    (path, folder)
+                    let (folder, symlink) = entry_kind(&entry, &path);
+                    (path, folder, symlink)
                 })
                 .collect();
             here.sort();
-            for (path, folder) in here {
-                if !progress.live() {
+            for (path, folder, symlink) in here {
+                if !progress.live() || !out.room() {
                     return;
                 }
                 if folder {
-                    walk(&path, remembered, files, folders, playlists, progress);
+                    walk(
+                        &path,
+                        canonical && !symlink,
+                        depth + 1,
+                        remembered,
+                        out,
+                        progress,
+                    );
                 } else if is_playlist_file(&path) {
-                    playlists.push(path.clone());
+                    out.playlists.push(path.clone());
                 } else if is_audio_file(&path) {
                     let Some((mtime, size)) = stat(&path) else {
                         continue;
@@ -523,7 +607,7 @@ fn walk(
                         .files
                         .get(&path)
                         .is_some_and(|known| known.mtime == mtime && known.size == size);
-                    files.push(Found {
+                    out.files.push(Found {
                         path,
                         mtime,
                         size,
@@ -533,16 +617,17 @@ fn walk(
             }
         }
     }
-    progress.walking(files.len() + folders.len());
+    progress.walking(out.files.len() + out.folders.len());
 }
 
-/// Whether a listed entry is a folder, without a stat where the listing already said so. A
-/// share charges for every stat, and a big library has one entry per track; a symlink is the one
-/// case that still has to be followed to find out.
-fn is_folder(entry: &std::fs::DirEntry, path: &Path) -> bool {
+/// Whether a listed entry is a folder and whether it is a symlink, without a stat where the
+/// listing already said so. A share charges for every stat, and a big library has one entry per
+/// track; a symlink is the one case that still has to be followed to find out.
+fn entry_kind(entry: &std::fs::DirEntry, path: &Path) -> (bool, bool) {
     match entry.file_type() {
-        Ok(kind) if !kind.is_symlink() => kind.is_dir(),
-        _ => path.is_dir(),
+        Ok(kind) if !kind.is_symlink() => (kind.is_dir(), false),
+        Ok(_) => (path.is_dir(), true),
+        Err(_) => (path.is_dir(), path.is_symlink()),
     }
 }
 
@@ -919,23 +1004,22 @@ mod tests {
         touch(&dir.join("a/b/c/deep.flac"));
         touch(&dir.join("a/b/c/notes.txt"));
 
-        let mut found = Vec::new();
-        let mut folders = Vec::new();
+        let mut out = Walked::default();
         walk(
             &dir,
+            false,
+            0,
             &Remembered::default(),
-            &mut found,
-            &mut folders,
-            &mut Vec::new(),
+            &mut out,
             &crate::progress::start(),
         );
 
-        let paths: Vec<PathBuf> = found.into_iter().map(|file| file.path).collect();
+        let paths: Vec<PathBuf> = out.files.into_iter().map(|file| file.path).collect();
         assert_eq!(
             paths,
             vec![dir.join("a/b/c/deep.flac"), dir.join("top.mp3")]
         );
-        let mut walked: Vec<PathBuf> = folders.into_iter().map(|folder| folder.path).collect();
+        let mut walked: Vec<PathBuf> = out.folders.into_iter().map(|folder| folder.path).collect();
         walked.sort();
         assert_eq!(
             walked,
