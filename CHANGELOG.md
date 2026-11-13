@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.45.1] - 2026-11-13
+
 ### Fixed
 
 - Scanning a library that contains folder symlink loops no longer duplicates every track or
